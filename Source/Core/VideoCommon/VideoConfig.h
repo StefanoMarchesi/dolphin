@@ -222,6 +222,9 @@ struct VideoConfig final
   OutputResamplingMode output_resampling_mode = OutputResamplingMode::Default;
   AnisotropicFilteringMode iMaxAnisotropy = AnisotropicFilteringMode::Default;
   std::string sPostProcessingShader;
+  // Runtime gate for the V3D upscaler experiment. There is deliberately no UI
+  // control until the backend has correctness and performance evidence.
+  bool bV3DUpscalerExperiment = false;
   bool bForceTrueColor = false;
   bool bDisableCopyFilter = false;
   bool bArbitraryMipmapDetection = false;
