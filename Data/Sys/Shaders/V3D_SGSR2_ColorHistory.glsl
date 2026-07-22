@@ -17,6 +17,7 @@ float V3DSGSR2Luma(float3 color)
 void main()
 {
   float2 source_size = GetResolution() * src_rect.zw;
+  float2 source_origin = GetResolution() * src_rect.xy;
   float2 target_size = GetTargetResolution();
   float2 uv = GetCoordinates();
   float2 local_uv = clamp((uv - src_rect.xy) / src_rect.zw, float2(0.0), float2(1.0));
@@ -45,7 +46,8 @@ void main()
   {
     for (int x = -1; x <= 1; ++x)
     {
-      int2 pixel = clamp(center_position + int2(x, y), int2(0), int2(source_size) - int2(1));
+      int2 pixel = int2(source_origin) +
+                   clamp(center_position + int2(x, y), int2(0), int2(source_size) - int2(1));
       float3 sample_color = texelFetch(samp0, int3(pixel, GetLayer()), 0).xyz;
       float2 offset = float2(x, y) - phase;
       float base = clamp(dot(offset, offset) * kernel_bias_squared, 0.0, 1.0);
@@ -64,6 +66,14 @@ void main()
   float3 box_variance = max(box_squared_sum / 9.0 - box_mean * box_mean, float3(0.0));
   float3 box_sigma = sqrt(box_variance);
 
+  // Never sample newly allocated history. Undefined texels can contain NaNs, and a subsequent
+  // mix with zero history weight is not guaranteed to remove them on every Vulkan driver.
+  if (intermediary_buffer == 0)
+  {
+    SetOutput(float4(clamp(current, 0.0, 1.0), 1.0));
+    return;
+  }
+
   float3 history = textureLod(samp1, float3(local_uv, 0.0), 0.0).xyz;
   float3 variance_min = max(box_min, box_mean - box_sigma * 1.25);
   float3 variance_max = min(box_max, box_mean + box_sigma * 1.25);
@@ -78,9 +88,6 @@ void main()
   float box_range = V3DSGSR2Luma(box_max) - V3DSGSR2Luma(box_min);
   float thin_lock = (1.0 - reactive) * smoothstep(0.08, 0.30, box_range);
   float history_alpha = mix(0.82, 0.91, thin_lock) * (1.0 - reactive);
-  if (intermediary_buffer == 0)
-    history_alpha = 0.0;
-
   float3 output_color = mix(current, clipped_history, history_alpha);
   SetOutput(float4(clamp(output_color, 0.0, 1.0), 1.0));
 }
