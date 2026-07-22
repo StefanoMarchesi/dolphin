@@ -3,6 +3,9 @@
 
 #include "VideoBackends/Vulkan/StateTracker.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include "Common/Assert.h"
 
 #include "VideoBackends/Vulkan/CommandBufferManager.h"
@@ -288,6 +291,14 @@ void StateTracker::BeginRenderPass()
 
   m_current_render_pass = m_framebuffer->GetLoadRenderPass();
   m_framebuffer_render_area = m_framebuffer->GetRect();
+  if (std::getenv("DOLPHIN_V3D_TRACE_LOAD_PASSES") != nullptr)
+  {
+    std::fprintf(stderr, "V3D-RP-LOAD fb=%p size=%ux%u color=%p depth=%p\n",
+                 static_cast<void*>(m_framebuffer), m_framebuffer->GetWidth(),
+                 m_framebuffer->GetHeight(),
+                 static_cast<void*>(m_framebuffer->GetColorAttachment()),
+                 static_cast<void*>(m_framebuffer->GetDepthAttachment()));
+  }
   m_framebuffer->PrepareForRenderPass();
 
   VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
