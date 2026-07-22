@@ -99,6 +99,11 @@ VKGfx::CreateFramebuffer(AbstractTexture* color_attachment, AbstractTexture* dep
 
 void VKGfx::SetPipeline(const AbstractPipeline* pipeline)
 {
+  if (std::getenv("DOLPHIN_V3D_LAZY_EFB_REBIND") != nullptr &&
+      pipeline->m_config.usage != AbstractPipelineUsage::Utility)
+  {
+    g_framebuffer_manager->BindEFBFramebuffer();
+  }
   StateTracker::GetInstance()->SetPipeline(static_cast<const VKPipeline*>(pipeline));
 }
 

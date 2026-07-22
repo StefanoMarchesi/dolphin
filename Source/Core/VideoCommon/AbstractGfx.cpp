@@ -3,6 +3,8 @@
 
 #include "VideoCommon/AbstractGfx.h"
 
+#include <cstdlib>
+
 #include "Common/Assert.h"
 
 #include "VideoCommon/AbstractFramebuffer.h"
@@ -34,7 +36,8 @@ void AbstractGfx::BeginUtilityDrawing()
 void AbstractGfx::EndUtilityDrawing()
 {
   // Reset framebuffer. Pipeline will be reset at next draw.
-  g_framebuffer_manager->BindEFBFramebuffer();
+  if (std::getenv("DOLPHIN_V3D_LAZY_EFB_REBIND") == nullptr)
+    g_framebuffer_manager->BindEFBFramebuffer();
 
   // Reset our viewport and scissor to the last stored value
   SetViewport(m_viewport_and_scissor.viewport_x, m_viewport_and_scissor.viewport_y,
