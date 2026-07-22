@@ -368,10 +368,20 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
       const u64 rp_begin = m_v3d_render_pass_begins.exchange(0, std::memory_order_relaxed);
       const u64 rp_end = m_v3d_render_pass_ends.exchange(0, std::memory_order_relaxed);
       const u64 barriers = m_v3d_pipeline_barriers.exchange(0, std::memory_order_relaxed);
+      std::array<u64, static_cast<size_t>(V3DRenderPassType::Count)> rp_types;
+      std::array<u64, static_cast<size_t>(V3DBarrierType::Count)> barrier_types;
+      for (size_t i = 0; i < rp_types.size(); ++i)
+        rp_types[i] = m_v3d_render_pass_types[i].exchange(0, std::memory_order_relaxed);
+      for (size_t i = 0; i < barrier_types.size(); ++i)
+        barrier_types[i] = m_v3d_barrier_types[i].exchange(0, std::memory_order_relaxed);
       INFO_LOG_FMT(VIDEO,
                    "V3D-PERF frames=60 requested_submits={} queue_submits={} fence_waits={} "
-                   "fence_wait_us={} queue_submit_us={} render_passes={}/{} barriers={}",
-                   requested, queued, waits, wait_us, submit_us, rp_begin, rp_end, barriers);
+                   "fence_wait_us={} queue_submit_us={} render_passes={}/{} "
+                   "rp_load={} rp_discard={} rp_clear={} barriers={} barrier_staging={} "
+                   "barrier_layout={} barrier_compute={} barrier_hazard={} barrier_image={}",
+                   requested, queued, waits, wait_us, submit_us, rp_begin, rp_end, rp_types[0],
+                   rp_types[1], rp_types[2], barriers, barrier_types[0], barrier_types[1],
+                   barrier_types[2], barrier_types[3], barrier_types[4]);
     }
     m_current_frame = (m_current_frame + 1) % NUM_FRAMES_IN_FLIGHT;
 
@@ -506,10 +516,13 @@ void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
   }
 }
 
-void CommandBufferManager::NotifyRenderPassBegin()
+void CommandBufferManager::NotifyRenderPassBegin(V3DRenderPassType type)
 {
   if (m_v3d_perf_stats_enabled)
+  {
     m_v3d_render_pass_begins.fetch_add(1, std::memory_order_relaxed);
+    m_v3d_render_pass_types[static_cast<size_t>(type)].fetch_add(1, std::memory_order_relaxed);
+  }
 }
 
 void CommandBufferManager::NotifyRenderPassEnd()
@@ -518,10 +531,13 @@ void CommandBufferManager::NotifyRenderPassEnd()
     m_v3d_render_pass_ends.fetch_add(1, std::memory_order_relaxed);
 }
 
-void CommandBufferManager::NotifyPipelineBarrier()
+void CommandBufferManager::NotifyPipelineBarrier(V3DBarrierType type)
 {
   if (m_v3d_perf_stats_enabled)
+  {
     m_v3d_pipeline_barriers.fetch_add(1, std::memory_order_relaxed);
+    m_v3d_barrier_types[static_cast<size_t>(type)].fetch_add(1, std::memory_order_relaxed);
+  }
 }
 
 void CommandBufferManager::BeginCommandBuffer()

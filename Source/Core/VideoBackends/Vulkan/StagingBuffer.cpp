@@ -46,7 +46,7 @@ void StagingBuffer::BufferMemoryBarrier(VkCommandBuffer command_buffer, VkBuffer
       size                                      // VkDeviceSize       size
   };
 
-  g_command_buffer_mgr->NotifyPipelineBarrier();
+  g_command_buffer_mgr->NotifyPipelineBarrier(V3DBarrierType::StagingBuffer);
   vkCmdPipelineBarrier(command_buffer, src_stage_mask, dst_stage_mask, 0, 0, nullptr, 1,
                        &buffer_info, 0, nullptr);
 }

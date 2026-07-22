@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -16,6 +17,24 @@
 
 namespace Vulkan
 {
+enum class V3DRenderPassType : size_t
+{
+  Load,
+  Discard,
+  Clear,
+  Count
+};
+
+enum class V3DBarrierType : size_t
+{
+  StagingBuffer,
+  ImageLayout,
+  ComputeLayout,
+  AttachmentHazard,
+  StagingImage,
+  Count
+};
+
 class CommandBufferManager
 {
 public:
@@ -82,9 +101,9 @@ public:
                            VkSwapchainKHR present_swap_chain = VK_NULL_HANDLE,
                            uint32_t present_image_index = 0xFFFFFFFF);
 
-  void NotifyRenderPassBegin();
+  void NotifyRenderPassBegin(V3DRenderPassType type);
   void NotifyRenderPassEnd();
-  void NotifyPipelineBarrier();
+  void NotifyPipelineBarrier(V3DBarrierType type);
 
   // Was the last present submitted to the queue a failure? If so, we must recreate our swapchain.
   bool CheckLastPresentFail() { return m_last_present_failed.TestAndClear(); }
@@ -173,6 +192,10 @@ private:
   std::atomic<u64> m_v3d_render_pass_begins{0};
   std::atomic<u64> m_v3d_render_pass_ends{0};
   std::atomic<u64> m_v3d_pipeline_barriers{0};
+  std::array<std::atomic<u64>, static_cast<size_t>(V3DRenderPassType::Count)>
+      m_v3d_render_pass_types{};
+  std::array<std::atomic<u64>, static_cast<size_t>(V3DBarrierType::Count)>
+      m_v3d_barrier_types{};
   u64 m_v3d_present_frames = 0;
 };
 
