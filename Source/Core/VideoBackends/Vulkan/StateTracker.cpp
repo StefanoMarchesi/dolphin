@@ -299,6 +299,7 @@ void StateTracker::BeginRenderPass()
 
   vkCmdBeginRenderPass(g_command_buffer_mgr->GetCurrentCommandBuffer(), &begin_info,
                        VK_SUBPASS_CONTENTS_INLINE);
+  g_command_buffer_mgr->NotifyRenderPassBegin();
 }
 
 void StateTracker::BeginDiscardRenderPass()
@@ -319,6 +320,7 @@ void StateTracker::BeginDiscardRenderPass()
 
   vkCmdBeginRenderPass(g_command_buffer_mgr->GetCurrentCommandBuffer(), &begin_info,
                        VK_SUBPASS_CONTENTS_INLINE);
+  g_command_buffer_mgr->NotifyRenderPassBegin();
 }
 
 void StateTracker::EndRenderPass()
@@ -327,6 +329,7 @@ void StateTracker::EndRenderPass()
     return;
 
   vkCmdEndRenderPass(g_command_buffer_mgr->GetCurrentCommandBuffer());
+  g_command_buffer_mgr->NotifyRenderPassEnd();
   m_current_render_pass = VK_NULL_HANDLE;
 }
 
@@ -349,6 +352,7 @@ void StateTracker::BeginClearRenderPass(const VkRect2D& area, const VkClearValue
 
   vkCmdBeginRenderPass(g_command_buffer_mgr->GetCurrentCommandBuffer(), &begin_info,
                        VK_SUBPASS_CONTENTS_INLINE);
+  g_command_buffer_mgr->NotifyRenderPassBegin();
 }
 
 void StateTracker::SetViewport(const VkViewport& viewport)

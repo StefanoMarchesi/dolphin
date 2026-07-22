@@ -602,6 +602,7 @@ void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer, VkImageLayout
   }
   m_compute_layout = ComputeImageLayout::Undefined;
 
+  g_command_buffer_mgr->NotifyPipelineBarrier();
   vkCmdPipelineBarrier(command_buffer, srcStageMask, dstStageMask, 0, 0, nullptr, 0, nullptr, 1,
                        &barrier);
 
@@ -709,6 +710,7 @@ void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer,
   m_layout = barrier.newLayout;
   m_compute_layout = new_layout;
 
+  g_command_buffer_mgr->NotifyPipelineBarrier();
   vkCmdPipelineBarrier(command_buffer, srcStageMask, dstStageMask, 0, 0, nullptr, 0, nullptr, 1,
                        &barrier);
 }
@@ -746,6 +748,7 @@ void VKTexture::PrepareForRenderPass(VkCommandBuffer command_buffer) const
       srcStage = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
       dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     }
+    g_command_buffer_mgr->NotifyPipelineBarrier();
     vkCmdPipelineBarrier(command_buffer, srcStage, dstStage, 0,  //
                          0, nullptr, 0, nullptr, 1, &barrier);
   }
@@ -949,6 +952,7 @@ void VKStagingTexture::CopyFromTextureToLinearImage(const VKTexture* src_tex,
   linear_image_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
   linear_image_barrier.image = m_linear_image;
   linear_image_barrier.subresourceRange = {aspect, 0, 1, 0, 1};
+  g_command_buffer_mgr->NotifyPipelineBarrier();
   vkCmdPipelineBarrier(g_command_buffer_mgr->GetCurrentCommandBuffer(),
                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
                        nullptr, 0, nullptr, 1, &linear_image_barrier);
@@ -973,6 +977,7 @@ void VKStagingTexture::CopyFromTextureToLinearImage(const VKTexture* src_tex,
   linear_image_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
   linear_image_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
+  g_command_buffer_mgr->NotifyPipelineBarrier();
   vkCmdPipelineBarrier(g_command_buffer_mgr->GetCurrentCommandBuffer(),
                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
                        nullptr, 0, nullptr, 1, &linear_image_barrier);

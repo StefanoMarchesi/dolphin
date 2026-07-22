@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -80,6 +81,10 @@ public:
                            bool advance_to_next_frame = false,
                            VkSwapchainKHR present_swap_chain = VK_NULL_HANDLE,
                            uint32_t present_image_index = 0xFFFFFFFF);
+
+  void NotifyRenderPassBegin();
+  void NotifyRenderPassEnd();
+  void NotifyPipelineBarrier();
 
   // Was the last present submitted to the queue a failure? If so, we must recreate our swapchain.
   bool CheckLastPresentFail() { return m_last_present_failed.TestAndClear(); }
@@ -158,6 +163,17 @@ private:
   VkResult m_last_present_result = VK_SUCCESS;
   bool m_use_threaded_submission = false;
   u32 m_descriptor_set_count = DESCRIPTOR_SETS_PER_POOL;
+
+  bool m_v3d_perf_stats_enabled = false;
+  std::atomic<u64> m_v3d_requested_submits{0};
+  std::atomic<u64> m_v3d_queue_submits{0};
+  std::atomic<u64> m_v3d_fence_waits{0};
+  std::atomic<u64> m_v3d_fence_wait_us{0};
+  std::atomic<u64> m_v3d_queue_submit_us{0};
+  std::atomic<u64> m_v3d_render_pass_begins{0};
+  std::atomic<u64> m_v3d_render_pass_ends{0};
+  std::atomic<u64> m_v3d_pipeline_barriers{0};
+  u64 m_v3d_present_frames = 0;
 };
 
 extern std::unique_ptr<CommandBufferManager> g_command_buffer_mgr;

@@ -5,9 +5,12 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 
 #include "Common/Assert.h"
+#include "Common/Logging/Log.h"
 #include "Common/MsgHandler.h"
+#include "Common/Timer.h"
 
 #include "VideoBackends/Vulkan/VulkanContext.h"
 #include "VideoCommon/Constants.h"
@@ -16,7 +19,8 @@
 namespace Vulkan
 {
 CommandBufferManager::CommandBufferManager(bool use_threaded_submission)
-    : m_use_threaded_submission(use_threaded_submission)
+    : m_use_threaded_submission(use_threaded_submission),
+      m_v3d_perf_stats_enabled(std::getenv("DOLPHIN_V3D_PERF_STATS") != nullptr)
 {
 }
 
@@ -280,8 +284,15 @@ void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
   }
 
   // Wait for this command buffer to be completed.
+  const u64 wait_start_us = Common::Timer::NowUs();
   VkResult res =
       vkWaitForFences(g_vulkan_context->GetDevice(), 1, &resources.fence, VK_TRUE, UINT64_MAX);
+  if (m_v3d_perf_stats_enabled)
+  {
+    m_v3d_fence_waits.fetch_add(1, std::memory_order_relaxed);
+    m_v3d_fence_wait_us.fetch_add(Common::Timer::NowUs() - wait_start_us,
+                                 std::memory_order_relaxed);
+  }
   if (res != VK_SUCCESS)
     LOG_VULKAN_ERROR(res, "vkWaitForFences failed: ");
 
@@ -313,6 +324,8 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
                                                VkSwapchainKHR present_swap_chain,
                                                uint32_t present_image_index)
 {
+  if (m_v3d_perf_stats_enabled)
+    m_v3d_requested_submits.fetch_add(1, std::memory_order_relaxed);
   // End the current command buffer.
   CmdBufferResources& resources = GetCurrentCmdBufferResources();
   for (VkCommandBuffer command_buffer : resources.command_buffers)
@@ -345,6 +358,21 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
 
   if (advance_to_next_frame)
   {
+    if (m_v3d_perf_stats_enabled && ++m_v3d_present_frames % 60 == 0)
+    {
+      const u64 requested = m_v3d_requested_submits.exchange(0, std::memory_order_relaxed);
+      const u64 queued = m_v3d_queue_submits.exchange(0, std::memory_order_relaxed);
+      const u64 waits = m_v3d_fence_waits.exchange(0, std::memory_order_relaxed);
+      const u64 wait_us = m_v3d_fence_wait_us.exchange(0, std::memory_order_relaxed);
+      const u64 submit_us = m_v3d_queue_submit_us.exchange(0, std::memory_order_relaxed);
+      const u64 rp_begin = m_v3d_render_pass_begins.exchange(0, std::memory_order_relaxed);
+      const u64 rp_end = m_v3d_render_pass_ends.exchange(0, std::memory_order_relaxed);
+      const u64 barriers = m_v3d_pipeline_barriers.exchange(0, std::memory_order_relaxed);
+      INFO_LOG_FMT(VIDEO,
+                   "V3D-PERF frames=60 requested_submits={} queue_submits={} fence_waits={} "
+                   "fence_wait_us={} queue_submit_us={} render_passes={}/{} barriers={}",
+                   requested, queued, waits, wait_us, submit_us, rp_begin, rp_end, barriers);
+    }
     m_current_frame = (m_current_frame + 1) % NUM_FRAMES_IN_FLIGHT;
 
     // Wait for all command buffers that used the descriptor pool to finish
@@ -426,8 +454,15 @@ void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
     submit_info.pSignalSemaphores = &m_present_semaphores[present_image_index];
   }
 
+  const u64 submit_start_us = Common::Timer::NowUs();
   VkResult res =
       vkQueueSubmit(g_vulkan_context->GetGraphicsQueue(), 1, &submit_info, resources.fence);
+  if (m_v3d_perf_stats_enabled)
+  {
+    m_v3d_queue_submits.fetch_add(1, std::memory_order_relaxed);
+    m_v3d_queue_submit_us.fetch_add(Common::Timer::NowUs() - submit_start_us,
+                                   std::memory_order_relaxed);
+  }
   if (res != VK_SUCCESS)
   {
     LOG_VULKAN_ERROR(res, "vkQueueSubmit failed: ");
@@ -469,6 +504,24 @@ void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
 #endif
     }
   }
+}
+
+void CommandBufferManager::NotifyRenderPassBegin()
+{
+  if (m_v3d_perf_stats_enabled)
+    m_v3d_render_pass_begins.fetch_add(1, std::memory_order_relaxed);
+}
+
+void CommandBufferManager::NotifyRenderPassEnd()
+{
+  if (m_v3d_perf_stats_enabled)
+    m_v3d_render_pass_ends.fetch_add(1, std::memory_order_relaxed);
+}
+
+void CommandBufferManager::NotifyPipelineBarrier()
+{
+  if (m_v3d_perf_stats_enabled)
+    m_v3d_pipeline_barriers.fetch_add(1, std::memory_order_relaxed);
 }
 
 void CommandBufferManager::BeginCommandBuffer()
