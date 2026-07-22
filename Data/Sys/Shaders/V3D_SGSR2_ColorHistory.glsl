@@ -2,13 +2,6 @@
 // This is a real ping-pong history path, but it deliberately does not claim
 // motion-vector reprojection: Dolphin does not expose game motion at present.
 
-float V3DSGSR2FastLanczos(float base)
-{
-  float y = base - 1.0;
-  float y2 = y * y;
-  return (0.75 * y + y2) * y2;
-}
-
 float V3DSGSR2Luma(float3 color)
 {
   return dot(color, float3(0.2126, 0.7152, 0.0722));
@@ -17,7 +10,6 @@ float V3DSGSR2Luma(float3 color)
 void main()
 {
   float2 source_size = GetResolution() * src_rect.zw;
-  float2 source_origin = GetResolution() * src_rect.xy;
   float2 target_size = GetTargetResolution();
   float2 uv = GetCoordinates();
   float2 local_uv = clamp((uv - src_rect.xy) / src_rect.zw, float2(0.0), float2(1.0));
@@ -28,15 +20,12 @@ void main()
     return;
   }
 
-  float2 source_position = local_uv * source_size - float2(0.5);
-  int2 center_position = int2(floor(source_position));
-  float2 phase = source_position - floor(source_position);
-  float scale = min(target_size.x / source_size.x, 1.99);
-  float kernel_bias = max(1.0, scale) * 0.5;
-  float kernel_bias_squared = kernel_bias * kernel_bias;
-
-  float3 weighted_color = float3(0.0);
-  float weight_sum = 0.0;
+  // Use Dolphin's stable bilinear reconstruction while validating the temporal path. The
+  // experimental nine-tap kernel previously used here produced sparse outliers on V3DV.
+  float3 current = clamp(Sample().xyz, 0.0, 1.0);
+  float2 source_texel = GetInvResolution();
+  float2 minimum_uv = src_rect.xy + source_texel * 0.5;
+  float2 maximum_uv = src_rect.xy + src_rect.zw - source_texel * 0.5;
   float3 box_min = float3(1.0e10);
   float3 box_max = float3(-1.0e10);
   float3 box_sum = float3(0.0);
@@ -46,14 +35,9 @@ void main()
   {
     for (int x = -1; x <= 1; ++x)
     {
-      int2 pixel = int2(source_origin) +
-                   clamp(center_position + int2(x, y), int2(0), int2(source_size) - int2(1));
-      float3 sample_color = texelFetch(samp0, int3(pixel, GetLayer()), 0).xyz;
-      float2 offset = float2(x, y) - phase;
-      float base = clamp(dot(offset, offset) * kernel_bias_squared, 0.0, 1.0);
-      float weight = V3DSGSR2FastLanczos(base);
-      weighted_color += sample_color * weight;
-      weight_sum += weight;
+      float2 sample_uv = clamp(uv + float2(x, y) * source_texel, minimum_uv, maximum_uv);
+      float3 sample_color =
+          clamp(textureLod(samp0, float3(sample_uv, GetLayer()), 0.0).xyz, 0.0, 1.0);
       box_min = min(box_min, sample_color);
       box_max = max(box_max, sample_color);
       box_sum += sample_color;
@@ -61,7 +45,6 @@ void main()
     }
   }
 
-  float3 current = weighted_color / max(weight_sum, 1.0e-6);
   float3 box_mean = box_sum / 9.0;
   float3 box_variance = max(box_squared_sum / 9.0 - box_mean * box_mean, float3(0.0));
   float3 box_sigma = sqrt(box_variance);
@@ -75,6 +58,13 @@ void main()
   }
 
   float3 history = textureLod(samp1, float3(local_uv, 0.0), 0.0).xyz;
+  // Comparisons against NaN are false, so this also rejects non-finite history without relying
+  // on backend-specific isnan/isinf lowering. A valid SDR history is always in [0, 1].
+  if (!all(greaterThanEqual(history, float3(0.0))) ||
+      !all(lessThanEqual(history, float3(1.0))))
+  {
+    history = current;
+  }
   float3 variance_min = max(box_min, box_mean - box_sigma * 1.25);
   float3 variance_max = min(box_max, box_mean + box_sigma * 1.25);
   float3 clipped_history = clamp(history, variance_min, variance_max);
