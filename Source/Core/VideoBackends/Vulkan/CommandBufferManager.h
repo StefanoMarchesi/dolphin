@@ -104,7 +104,6 @@ public:
   void NotifyRenderPassBegin(V3DRenderPassType type);
   void NotifyRenderPassEnd();
   void NotifyPipelineBarrier(V3DBarrierType type);
-  bool UseV3DFastRenderPass() const { return m_v3d_fast_renderpass_enabled; }
 
   // Was the last present submitted to the queue a failure? If so, we must recreate our swapchain.
   bool CheckLastPresentFail() { return m_last_present_failed.TestAndClear(); }
@@ -185,7 +184,6 @@ private:
   u32 m_descriptor_set_count = DESCRIPTOR_SETS_PER_POOL;
 
   bool m_v3d_perf_stats_enabled = false;
-  bool m_v3d_fast_renderpass_enabled = false;
   std::atomic<u64> m_v3d_requested_submits{0};
   std::atomic<u64> m_v3d_queue_submits{0};
   std::atomic<u64> m_v3d_fence_waits{0};

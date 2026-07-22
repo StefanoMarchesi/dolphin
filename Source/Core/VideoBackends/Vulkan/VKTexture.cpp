@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 
 #include "Common/Align.h"
@@ -723,7 +724,7 @@ void VKTexture::PrepareForRenderPass(VkCommandBuffer command_buffer) const
   if (m_written_since_last_layout_change)
   {
     // The opt-in V3D path provides this ordering through an external-to-subpass dependency.
-    if (g_command_buffer_mgr->UseV3DFastRenderPass())
+    if (std::getenv("DOLPHIN_V3D_FAST_RENDERPASS") != nullptr)
       return;
 
     // If the image has already been written, we need a barrier to prevent WaW or RaW hazards.
