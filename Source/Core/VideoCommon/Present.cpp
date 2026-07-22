@@ -212,7 +212,10 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
 
   video_events.before_present_event.Trigger(present_info);
 
-  if (!is_duplicate || !g_ActiveConfig.bSkipPresentingDuplicateXFBs)
+  // Mode 6 intentionally consumes duplicate VI slots for generated frames, even if the normal
+  // duplicate-XFB optimization is enabled.
+  if (!is_duplicate || !g_ActiveConfig.bSkipPresentingDuplicateXFBs ||
+      g_ActiveConfig.iV3DUpscalerMode == 6)
   {
     Present(&present_info);
     ProcessFrameDumping(ticks);
@@ -906,6 +909,36 @@ void Presenter::RenderXFBToScreen(const MathUtil::Rectangle<int>& target_rc,
 void Presenter::Present(PresentInfo* present_info)
 {
   m_present_count++;
+
+  if (m_post_processor && g_ActiveConfig.iV3DUpscalerMode == 6 && present_info)
+  {
+    const bool duplicate =
+        present_info->reason == PresentInfo::PresentReason::VideoInterfaceDuplicate;
+    if (!duplicate)
+    {
+      if (m_v3d_presents_since_unique_frame != 0)
+      {
+        m_v3d_frame_generation_interval =
+            std::clamp(m_v3d_presents_since_unique_frame, 1u, 3u);
+      }
+      m_v3d_presents_since_unique_frame = 1;
+    }
+    else
+    {
+      ++m_v3d_presents_since_unique_frame;
+    }
+
+    const float phase = std::min(
+        static_cast<float>(m_v3d_presents_since_unique_frame) /
+            static_cast<float>(m_v3d_frame_generation_interval),
+        1.0f);
+    m_post_processor->SetV3DFrameGenerationState(phase, !duplicate);
+  }
+  else if (m_post_processor)
+  {
+    m_v3d_presents_since_unique_frame = 0;
+    m_post_processor->SetV3DFrameGenerationState(1.0f, true);
+  }
 
   if (g_gfx->IsHeadless() || (!m_onscreen_ui && !m_xfb_entry))
     return;

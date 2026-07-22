@@ -36,9 +36,9 @@ namespace VideoCommon
 {
 static const char s_empty_pixel_shader[] = "void main() { SetOutput(Sample()); }\n";
 static const char s_default_pixel_shader_name[] = "default_pre_post_process";
-static constexpr std::array<const char*, 5> s_v3d_upscaler_shader_names = {
+static constexpr std::array<const char*, 6> s_v3d_upscaler_shader_names = {
     "V3D_SGSR1", "V3D_SGSR1_Edge", "V3D_SGSR1_Contrast", "V3D_SGSR2_ColorHistory",
-    "V3D_SGSR1_Contrast"};
+    "V3D_SGSR1_Contrast", "V3D_SGSR2_ColorHistory"};
 // Keep the highest quality possible to avoid losing quality on subtle gamma conversions.
 // RGBA16F should have enough quality even if we store colors in gamma space on it.
 static const AbstractTextureFormat s_intermediary_buffer_format = AbstractTextureFormat::RGBA16F;
@@ -439,11 +439,13 @@ void PostProcessing::RecompileShader()
 
   m_default_pipeline.reset();
   m_v3d_history_copy_pipeline.reset();
+  m_v3d_frame_generation_pipeline.reset();
   m_v3d_rcas_pipeline.reset();
   m_pipeline.reset();
   m_default_pixel_shader.reset();
   m_pixel_shader.reset();
   m_v3d_rcas_pixel_shader.reset();
+  m_v3d_frame_generation_pixel_shader.reset();
   m_default_vertex_shader.reset();
   m_vertex_shader.reset();
   m_v3d_history_frame_buffers = {};
@@ -453,6 +455,9 @@ void PostProcessing::RecompileShader()
   m_v3d_history_source_height = 0;
   m_v3d_history_last_time_ms = 0;
   m_v3d_history_valid = false;
+  m_v3d_frame_generation_phase = 1.0f;
+  m_v3d_frame_generation_new_frame = true;
+  m_v3d_frame_generation_endpoints_valid = false;
   if (!CompilePixelShader())
     return;
   if (!CompileVertexShader())
@@ -465,12 +470,14 @@ void PostProcessing::RecompilePipeline()
 {
   m_default_pipeline.reset();
   m_v3d_history_copy_pipeline.reset();
+  m_v3d_frame_generation_pipeline.reset();
   m_v3d_rcas_pipeline.reset();
   m_pipeline.reset();
   m_v3d_history_frame_buffers = {};
   m_v3d_history_textures = {};
   m_v3d_history_write_index = 0;
   m_v3d_history_valid = false;
+  m_v3d_frame_generation_endpoints_valid = false;
   CompilePipeline();
 }
 
@@ -576,12 +583,14 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
     }
   }
 
-  // SGSR2 color-history fallback. Dolphin does not expose game motion vectors at presentation
-  // time yet, but this path still provides a real persistent temporal history with reactive
-  // rejection. Keeping it isolated here makes the history lifecycle explicit and leaves the
-  // normal post-processing path unchanged.
-  if (g_ActiveConfig.iV3DUpscalerMode == 4 &&
+  // SGSR2 color-history fallback and its optional duplicate-VI frame-generation mode. Dolphin
+  // does not expose game motion vectors at presentation time yet. The frame-generation variant
+  // therefore interpolates two real SGSR2 outputs only in display slots that would otherwise
+  // contain duplicate XFBs; it never changes emulation timing.
+  const bool v3d_frame_generation = g_ActiveConfig.iV3DUpscalerMode == 6;
+  if ((g_ActiveConfig.iV3DUpscalerMode == 4 || v3d_frame_generation) &&
       g_backend_info.api_type == APIType::Vulkan && m_v3d_history_copy_pipeline &&
+      (!v3d_frame_generation || m_v3d_frame_generation_pipeline) &&
       (!copy_all_layers || src_tex->GetLayers() == 1) && present_rect.GetWidth() > 0 &&
       present_rect.GetHeight() > 0 && src_rect.GetWidth() > 0 && src_rect.GetHeight() > 0)
   {
@@ -593,6 +602,7 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
         (m_v3d_history_last_time_ms != 0 && current_time_ms - m_v3d_history_last_time_ms > 250))
     {
       m_v3d_history_valid = false;
+      m_v3d_frame_generation_endpoints_valid = false;
     }
     m_v3d_history_source_width = static_cast<u32>(src_rect.GetWidth());
     m_v3d_history_source_height = static_cast<u32>(src_rect.GetHeight());
@@ -615,6 +625,7 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
       }
       m_v3d_history_write_index = 0;
       m_v3d_history_valid = false;
+      m_v3d_frame_generation_endpoints_valid = false;
     }
 
     if (m_v3d_history_textures[0] && m_v3d_history_textures[1] &&
@@ -623,36 +634,71 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
       AbstractFramebuffer* const output_framebuffer = g_gfx->GetCurrentFramebuffer();
       const u32 write_index = m_v3d_history_write_index;
       const u32 read_index = write_index ^ 1;
-      AbstractTexture* const write_texture = m_v3d_history_textures[write_index].get();
-      AbstractTexture* const read_texture = m_v3d_history_textures[read_index].get();
+      AbstractTexture* previous_texture = m_v3d_history_textures[read_index].get();
+      AbstractTexture* current_texture = m_v3d_history_textures[write_index].get();
+      const bool history_was_valid = m_v3d_history_valid;
+      const bool render_new_frame =
+          !v3d_frame_generation || m_v3d_frame_generation_new_frame || !history_was_valid;
 
-      g_gfx->SetFramebuffer(m_v3d_history_frame_buffers[write_index].get());
-      g_gfx->SetTexture(0, src_tex);
-      g_gfx->SetTexture(1, read_texture);
-      FillUniformBuffer(src_rect, src_tex, src_layer,
-                        m_v3d_history_frame_buffers[write_index]->GetRect(), present_rect,
-                        m_uniform_staging_buffer.data(), true, m_v3d_history_valid);
-      g_vertex_manager->UploadUtilityUniforms(m_uniform_staging_buffer.data(),
-                                              static_cast<u32>(m_uniform_staging_buffer.size()));
-      g_gfx->SetViewportAndScissor(g_gfx->ConvertFramebufferRectangle(
-          write_texture->GetRect(), m_v3d_history_frame_buffers[write_index].get()));
-      g_gfx->SetPipeline(m_pipeline.get());
-      g_gfx->Draw(0, 3);
+      if (render_new_frame)
+      {
+        g_gfx->SetFramebuffer(m_v3d_history_frame_buffers[write_index].get());
+        g_gfx->SetTexture(0, src_tex);
+        g_gfx->SetTexture(1, previous_texture);
+        FillUniformBuffer(src_rect, src_tex, src_layer,
+                          m_v3d_history_frame_buffers[write_index]->GetRect(), present_rect,
+                          m_uniform_staging_buffer.data(), true, history_was_valid);
+        g_vertex_manager->UploadUtilityUniforms(
+            m_uniform_staging_buffer.data(), static_cast<u32>(m_uniform_staging_buffer.size()));
+        g_gfx->SetViewportAndScissor(g_gfx->ConvertFramebufferRectangle(
+            current_texture->GetRect(), m_v3d_history_frame_buffers[write_index].get()));
+        g_gfx->SetPipeline(m_pipeline.get());
+        g_gfx->Draw(0, 3);
+      }
+      else
+      {
+        // After a new frame the write index points at the older endpoint and read_index points at
+        // the latest real frame. Duplicate VI presents advance only the interpolation phase.
+        previous_texture = m_v3d_history_textures[write_index].get();
+        current_texture = m_v3d_history_textures[read_index].get();
+      }
 
       g_gfx->SetFramebuffer(output_framebuffer);
-      g_gfx->SetTexture(0, write_texture);
-      g_gfx->SetTexture(1, write_texture);
-      FillUniformBuffer(write_texture->GetRect(), write_texture, 0,
-                        output_framebuffer->GetRect(), present_rect,
-                        m_default_uniform_staging_buffer.data(), false, false);
-      g_vertex_manager->UploadUtilityUniforms(
-          m_default_uniform_staging_buffer.data(),
-          static_cast<u32>(m_default_uniform_staging_buffer.size()));
+      const bool generate_intermediate =
+          v3d_frame_generation && history_was_valid &&
+          (render_new_frame || m_v3d_frame_generation_endpoints_valid);
+      if (generate_intermediate)
+      {
+        g_gfx->SetTexture(0, previous_texture);
+        g_gfx->SetTexture(1, current_texture);
+        FillUniformBuffer(current_texture->GetRect(), current_texture, 0,
+                          output_framebuffer->GetRect(), present_rect,
+                          m_uniform_staging_buffer.data(), true, false);
+        g_vertex_manager->UploadUtilityUniforms(
+            m_uniform_staging_buffer.data(), static_cast<u32>(m_uniform_staging_buffer.size()));
+      }
+      else
+      {
+        g_gfx->SetTexture(0, current_texture);
+        g_gfx->SetTexture(1, current_texture);
+        FillUniformBuffer(current_texture->GetRect(), current_texture, 0,
+                          output_framebuffer->GetRect(), present_rect,
+                          m_default_uniform_staging_buffer.data(), false, false);
+        g_vertex_manager->UploadUtilityUniforms(
+            m_default_uniform_staging_buffer.data(),
+            static_cast<u32>(m_default_uniform_staging_buffer.size()));
+      }
       g_gfx->SetViewportAndScissor(g_gfx->ConvertFramebufferRectangle(dst, output_framebuffer));
-      g_gfx->SetPipeline(m_v3d_history_copy_pipeline.get());
+      g_gfx->SetPipeline(generate_intermediate ? m_v3d_frame_generation_pipeline.get() :
+                                                m_v3d_history_copy_pipeline.get());
       g_gfx->Draw(0, 3);
 
-      m_v3d_history_write_index ^= 1;
+      if (render_new_frame)
+      {
+        m_v3d_history_write_index ^= 1;
+        if (v3d_frame_generation)
+          m_v3d_frame_generation_endpoints_valid = history_was_valid;
+      }
       m_v3d_history_valid = true;
       return;
     }
@@ -781,6 +827,7 @@ std::string PostProcessing::GetUniformBufferHeader(bool user_post_process) const
   ss << "  int graphics_api;\n";
   // If true, it's an intermediary buffer (including the first), if false, it's the final one
   ss << "  int intermediary_buffer;\n";
+  ss << "  float v3d_frame_generation_phase;\n";
 
   ss << "  int resampling_method;\n";
   ss << "  int correct_color_space;\n";
@@ -1001,6 +1048,7 @@ struct BuiltinUniforms
   u32 time;
   s32 graphics_api;
   s32 intermediary_buffer;
+  float v3d_frame_generation_phase;
   s32 resampling_method;
   s32 correct_color_space;
   s32 game_color_space;
@@ -1048,6 +1096,7 @@ void PostProcessing::FillUniformBuffer(const MathUtil::Rectangle<int>& src,
   builtin_uniforms.time = static_cast<u32>(m_timer.ElapsedMs());
   builtin_uniforms.graphics_api = static_cast<s32>(g_backend_info.api_type);
   builtin_uniforms.intermediary_buffer = static_cast<s32>(intermediary_buffer);
+  builtin_uniforms.v3d_frame_generation_phase = m_v3d_frame_generation_phase;
 
   builtin_uniforms.resampling_method = static_cast<s32>(g_ActiveConfig.output_resampling_mode);
   // Color correction related uniforms.
@@ -1119,6 +1168,7 @@ bool PostProcessing::CompilePixelShader()
   m_default_pixel_shader.reset();
   m_pixel_shader.reset();
   m_v3d_rcas_pixel_shader.reset();
+  m_v3d_frame_generation_pixel_shader.reset();
 
   // Generate GLSL and compile the new shaders:
 
@@ -1179,6 +1229,22 @@ bool PostProcessing::CompilePixelShader()
     if (!m_v3d_rcas_pixel_shader)
       return false;
   }
+
+  if (v3d_mode == 6 && g_backend_info.api_type == APIType::Vulkan)
+  {
+    std::string frame_generation_shader_code;
+    if (!LoadShaderFromFile("V3D_FrameGeneration_ColorHistory", "",
+                            frame_generation_shader_code))
+    {
+      return false;
+    }
+
+    m_v3d_frame_generation_pixel_shader = g_gfx->CreateShaderFromSource(
+        ShaderStage::Pixel, GetHeader(true) + frame_generation_shader_code + GetFooter(), nullptr,
+        "V3D color-history frame-generation pixel shader");
+    if (!m_v3d_frame_generation_pixel_shader)
+      return false;
+  }
   return true;
 }
 
@@ -1236,8 +1302,9 @@ bool PostProcessing::CompilePipeline()
                                g_shader_cache->GetTexcoordGeometryShader() :
                                nullptr;
   config.pixel_shader = m_pixel_shader.get();
-  const bool v3d_temporal = g_ActiveConfig.iV3DUpscalerMode == 4 &&
-                            g_backend_info.api_type == APIType::Vulkan;
+  const bool v3d_temporal =
+      (g_ActiveConfig.iV3DUpscalerMode == 4 || g_ActiveConfig.iV3DUpscalerMode == 6) &&
+      g_backend_info.api_type == APIType::Vulkan;
   const bool v3d_rcas = g_ActiveConfig.iV3DUpscalerMode == 5 &&
                         g_backend_info.api_type == APIType::Vulkan;
   config.framebuffer_state = RenderState::GetColorFramebufferState(
@@ -1254,6 +1321,18 @@ bool PostProcessing::CompilePipeline()
     config.framebuffer_state = RenderState::GetColorFramebufferState(m_framebuffer_format);
     m_v3d_history_copy_pipeline = g_gfx->CreatePipeline(config);
     if (!m_v3d_history_copy_pipeline)
+      return false;
+  }
+
+  if (g_ActiveConfig.iV3DUpscalerMode == 6 &&
+      g_backend_info.api_type == APIType::Vulkan)
+  {
+    config.vertex_shader = m_vertex_shader.get();
+    config.geometry_shader = nullptr;
+    config.pixel_shader = m_v3d_frame_generation_pixel_shader.get();
+    config.framebuffer_state = RenderState::GetColorFramebufferState(m_framebuffer_format);
+    m_v3d_frame_generation_pipeline = g_gfx->CreatePipeline(config);
+    if (!m_v3d_frame_generation_pipeline)
       return false;
   }
 

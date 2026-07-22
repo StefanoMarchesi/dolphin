@@ -168,6 +168,12 @@ private:
   u64 m_frame_count = 0;
   u64 m_present_count = 0;
 
+  // Duplicate VI presents provide display slots for the experimental frame-generation mode.
+  // This counter measures the cadence of the previous unique XFB (normally 2 for 30 fps and 3
+  // for 20 fps on a 60 Hz VI) without changing emulation timing.
+  u32 m_v3d_frame_generation_interval = 2;
+  u32 m_v3d_presents_since_unique_frame = 0;
+
   // XFB tracking
   u64 m_last_xfb_ticks = 0;
   u32 m_last_xfb_addr = 0;
