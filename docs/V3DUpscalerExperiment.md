@@ -13,10 +13,15 @@ V3DUpscalerExperiment = True
 ```
 
 The active value is available as
-`g_ActiveConfig.bV3DUpscalerExperiment`. Any experimental render path added to
-this branch must check that value before allocating resources, compiling
-shaders, or changing presentation. The existing output path remains the exact
-fallback when the gate is false or initialization fails.
+`g_ActiveConfig.bV3DUpscalerExperiment`. On Vulkan, enabling it with no explicit
+post-processing shader selects the bundled `V3D_SGSR1` presentation shader.
+An explicitly selected user shader takes priority. Other backends and the
+disabled setting retain the existing output path; a missing or failed shader
+falls back through Dolphin's normal post-processing fallback.
+
+This is a spatial SGSR1 integration only. AMD Optical Flow, mip-1 scene-change
+detection, SGSR2 temporal history, and frame generation are not connected to
+Dolphin yet.
 
 Before exposing the setting in the UI:
 

@@ -35,6 +35,7 @@ namespace VideoCommon
 {
 static const char s_empty_pixel_shader[] = "void main() { SetOutput(Sample()); }\n";
 static const char s_default_pixel_shader_name[] = "default_pre_post_process";
+static const char s_v3d_upscaler_shader_name[] = "V3D_SGSR1";
 // Keep the highest quality possible to avoid losing quality on subtle gamma conversions.
 // RGBA16F should have enough quality even if we store colors in gamma space on it.
 static const AbstractTextureFormat s_intermediary_buffer_format = AbstractTextureFormat::RGBA16F;
@@ -979,7 +980,13 @@ bool PostProcessing::CompilePixelShader()
     m_default_uniform_staging_buffer.resize(0);
   }
 
-  m_config.LoadShader(g_ActiveConfig.sPostProcessingShader);
+  std::string post_processing_shader = g_ActiveConfig.sPostProcessingShader;
+  if (post_processing_shader.empty() && g_ActiveConfig.bV3DUpscalerExperiment &&
+      g_backend_info.api_type == APIType::Vulkan)
+  {
+    post_processing_shader = s_v3d_upscaler_shader_name;
+  }
+  m_config.LoadShader(post_processing_shader);
   m_pixel_shader = g_gfx->CreateShaderFromSource(
       ShaderStage::Pixel, GetHeader(true) + m_config.GetShaderCode() + GetFooter(),
       m_config.GetShaderIncluder(),
