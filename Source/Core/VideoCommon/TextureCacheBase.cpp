@@ -2904,17 +2904,24 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
   const auto shader_uid = TextureConversionShaderGen::GetShaderUid(
       dst_format, is_depth_copy, is_intensity, scale_by_half, linear_filter, 1.0f / gamma,
       filter_coefficients);
+  const bool use_transfer_copy =
+      std::getenv("DOLPHIN_V3D_TRANSFER_EFB_COPY") != nullptr &&
+      dst_format == EFBCopyFormat::RGBA8 && !is_depth_copy && !is_intensity && !scale_by_half &&
+      !linear_filter && gamma == 1.0f && filter_coefficients == std::array<u32, 3>{0, 64, 0} &&
+      bpmem.zcontrol.pixel_format == PixelFormat::RGBA6_Z24;
   const char* const compute_max_pixels_env = std::getenv("DOLPHIN_V3D_COMPUTE_EFB");
   const u64 compute_max_pixels =
       compute_max_pixels_env ? std::strtoull(compute_max_pixels_env, nullptr, 10) : 0;
   const u64 destination_pixels =
       static_cast<u64>(entry->texture->GetWidth()) * entry->texture->GetHeight();
-  const bool use_compute = compute_max_pixels != 0 && destination_pixels <= compute_max_pixels;
+  const bool use_compute = !use_transfer_copy && compute_max_pixels != 0 &&
+                           destination_pixels <= compute_max_pixels;
   const AbstractShader* compute_shader =
       use_compute ? g_shader_cache->GetEFBCopyToVRAMComputeShader(shader_uid) : nullptr;
   const AbstractPipeline* copy_pipeline =
-      use_compute ? nullptr : g_shader_cache->GetEFBCopyToVRAMPipeline(shader_uid);
-  if ((use_compute && !compute_shader) || (!use_compute && !copy_pipeline))
+      (use_compute || use_transfer_copy) ? nullptr :
+                                          g_shader_cache->GetEFBCopyToVRAMPipeline(shader_uid);
+  if ((use_compute && !compute_shader) || (!use_compute && !use_transfer_copy && !copy_pipeline))
   {
     WARN_LOG_FMT(VIDEO, "Skipping EFB copy to VRAM due to missing {} shader.",
                  use_compute ? "compute" : "graphics");
@@ -2927,6 +2934,29 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
   AbstractTexture* src_texture =
       is_depth_copy ? g_framebuffer_manager->ResolveEFBDepthTexture(framebuffer_rect) :
                       g_framebuffer_manager->ResolveEFBColorTexture(framebuffer_rect);
+
+  const MathUtil::Rectangle<int> destination_rect = entry->texture->GetRect();
+  if (use_transfer_copy && framebuffer_rect.GetWidth() == destination_rect.GetWidth() &&
+      framebuffer_rect.GetHeight() == destination_rect.GetHeight())
+  {
+    const u32 layers = std::min(src_texture->GetLayers(), entry->texture->GetLayers());
+    for (u32 layer = 0; layer < layers; ++layer)
+    {
+      entry->texture->CopyRectangleFromTexture(src_texture, framebuffer_rect, layer, 0,
+                                               destination_rect, layer, 0);
+    }
+    entry->texture->FinishedRendering();
+    return;
+  }
+  if (use_transfer_copy)
+  {
+    copy_pipeline = g_shader_cache->GetEFBCopyToVRAMPipeline(shader_uid);
+    if (!copy_pipeline)
+    {
+      WARN_LOG_FMT(VIDEO, "Skipping EFB copy to VRAM due to missing graphics shader.");
+      return;
+    }
+  }
 
   g_gfx->BeginUtilityDrawing();
   src_texture->FinishedRendering();
