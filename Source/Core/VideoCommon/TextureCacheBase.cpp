@@ -2908,7 +2908,8 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
       std::getenv("DOLPHIN_V3D_TRANSFER_EFB_COPY") != nullptr &&
       dst_format == EFBCopyFormat::RGBA8 && !is_depth_copy && !is_intensity && !scale_by_half &&
       !linear_filter && gamma == 1.0f && filter_coefficients == std::array<u32, 3>{0, 64, 0} &&
-      bpmem.zcontrol.pixel_format == PixelFormat::RGBA6_Z24;
+      (bpmem.zcontrol.pixel_format == PixelFormat::RGB8_Z24 ||
+       bpmem.zcontrol.pixel_format == PixelFormat::RGBA6_Z24);
   const char* const compute_max_pixels_env = std::getenv("DOLPHIN_V3D_COMPUTE_EFB");
   const u64 compute_max_pixels =
       compute_max_pixels_env ? std::strtoull(compute_max_pixels_env, nullptr, 10) : 0;
@@ -2939,6 +2940,13 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
   if (use_transfer_copy && framebuffer_rect.GetWidth() == destination_rect.GetWidth() &&
       framebuffer_rect.GetHeight() == destination_rect.GetHeight())
   {
+    if (std::getenv("DOLPHIN_V3D_TRACE_DISCARD") != nullptr)
+    {
+      std::fprintf(stderr, "V3D-EFB-TRANSFER size=%dx%d pixel_format=%u layers=%u\n",
+                   framebuffer_rect.GetWidth(), framebuffer_rect.GetHeight(),
+                   static_cast<u32>(bpmem.zcontrol.pixel_format),
+                   std::min(src_texture->GetLayers(), entry->texture->GetLayers()));
+    }
     const u32 layers = std::min(src_texture->GetLayers(), entry->texture->GetLayers());
     for (u32 layer = 0; layer < layers; ++layer)
     {
