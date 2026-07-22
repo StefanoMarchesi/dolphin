@@ -140,6 +140,13 @@ struct TCacheEntry
   u64 id = 0;
   u32 content_semaphore = 0;  // Counts up
 
+  // Opt-in V3D diagnostics for measuring the lifetime of EFB copies before first use.
+  u64 v3d_trace_copy_sequence = 0;
+  u64 v3d_trace_first_bind_sequence = 0;
+  u32 v3d_trace_copy_format = 0;
+  u32 v3d_trace_copy_flags = 0;
+  MathUtil::Rectangle<int> v3d_trace_source_rect{};
+
   // Indicates that this TCacheEntry has been invalided from m_textures_by_address
   bool invalidated = false;
 

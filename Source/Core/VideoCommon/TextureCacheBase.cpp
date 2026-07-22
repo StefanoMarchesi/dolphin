@@ -66,6 +66,7 @@ static const int TEXTURE_KILL_THRESHOLD = 64;
 static const int TEXTURE_POOL_KILL_THRESHOLD = 3;
 
 static int xfb_count = 0;
+static u64 s_v3d_efb_copy_sequence = 0;
 
 std::unique_ptr<TextureCacheBase> g_texture_cache;
 
@@ -1076,6 +1077,24 @@ void TextureCacheBase::BindTextures(BitSet32 used_textures,
     const RcTcacheEntry& tentry = m_bound_textures[i];
     if (used_textures[i] && tentry)
     {
+      if (std::getenv("DOLPHIN_V3D_TRACE_EFB_LIFETIME") != nullptr &&
+          tentry->v3d_trace_copy_sequence != 0 && tentry->v3d_trace_first_bind_sequence == 0)
+      {
+        tentry->v3d_trace_first_bind_sequence = s_v3d_efb_copy_sequence;
+        const auto& rect = tentry->v3d_trace_source_rect;
+        std::fprintf(stderr,
+                     "V3D-EFB-FIRST-BIND id=%llu copy_seq=%llu current_seq=%llu delta=%llu "
+                     "stage=%u native=%ux%u format=%u flags=%u rect=%d,%d,%d,%d "
+                     "sampler=%08x,%08x\n",
+                     static_cast<unsigned long long>(tentry->id),
+                     static_cast<unsigned long long>(tentry->v3d_trace_copy_sequence),
+                     static_cast<unsigned long long>(s_v3d_efb_copy_sequence),
+                     static_cast<unsigned long long>(s_v3d_efb_copy_sequence -
+                                                     tentry->v3d_trace_copy_sequence),
+                     i, tentry->native_width, tentry->native_height,
+                     tentry->v3d_trace_copy_format, tentry->v3d_trace_copy_flags, rect.left,
+                     rect.top, rect.right, rect.bottom, samplers[i].tm0.hex, samplers[i].tm1.hex);
+      }
       g_gfx->SetTexture(i, tentry->texture.get());
       pixel_shader_manager.SetTexDims(i, tentry->native_width, tentry->native_height);
 
@@ -2329,6 +2348,23 @@ void TextureCacheBase::CopyRenderTargetToTexture(
       }
       entry->may_have_overlapping_textures = false;
       entry->is_custom_tex = false;
+
+      if (std::getenv("DOLPHIN_V3D_TRACE_EFB_LIFETIME") != nullptr)
+      {
+        entry->v3d_trace_copy_sequence = ++s_v3d_efb_copy_sequence;
+        entry->v3d_trace_copy_format = static_cast<u32>(dstFormat);
+        entry->v3d_trace_copy_flags = (is_depth_copy ? 1u : 0u) | (isIntensity ? 2u : 0u) |
+                                      (scaleByHalf ? 4u : 0u) | (linear_filter ? 8u : 0u);
+        entry->v3d_trace_source_rect = srcRect;
+        std::fprintf(stderr,
+                     "V3D-EFB-CREATE id=%llu copy_seq=%llu native=%ux%u scaled=%ux%u "
+                     "format=%u flags=%u rect=%d,%d,%d,%d\n",
+                     static_cast<unsigned long long>(entry->id),
+                     static_cast<unsigned long long>(entry->v3d_trace_copy_sequence), tex_w,
+                     tex_h, scaled_tex_w, scaled_tex_h, entry->v3d_trace_copy_format,
+                     entry->v3d_trace_copy_flags, srcRect.left, srcRect.top, srcRect.right,
+                     srcRect.bottom);
+      }
 
       CopyEFBToCacheEntry(entry, is_depth_copy, srcRect, scaleByHalf, linear_filter, dstFormat,
                           isIntensity, gamma, clamp_top, clamp_bottom,
