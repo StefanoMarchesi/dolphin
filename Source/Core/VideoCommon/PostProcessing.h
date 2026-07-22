@@ -110,6 +110,11 @@ public:
 
   void RecompileShader();
   void RecompilePipeline();
+  void SetV3DFrameGenerationState(float phase, bool new_frame)
+  {
+    m_v3d_frame_generation_phase = phase;
+    m_v3d_frame_generation_new_frame = new_frame;
+  }
 
   void BlitFromTexture(const MathUtil::Rectangle<int>& dst, const MathUtil::Rectangle<int>& src,
                        const AbstractTexture* src_tex, int src_layer = -1);
@@ -141,6 +146,8 @@ protected:
   std::unique_ptr<AbstractShader> m_default_pixel_shader;
   std::unique_ptr<AbstractPipeline> m_default_pipeline;
   std::unique_ptr<AbstractPipeline> m_v3d_history_copy_pipeline;
+  std::unique_ptr<AbstractShader> m_v3d_frame_generation_pixel_shader;
+  std::unique_ptr<AbstractPipeline> m_v3d_frame_generation_pipeline;
   std::unique_ptr<AbstractShader> m_v3d_rcas_pixel_shader;
   std::unique_ptr<AbstractPipeline> m_v3d_rcas_pipeline;
   std::unique_ptr<AbstractFramebuffer> m_intermediary_frame_buffer;
@@ -152,6 +159,9 @@ protected:
   u32 m_v3d_history_source_height = 0;
   u64 m_v3d_history_last_time_ms = 0;
   bool m_v3d_history_valid = false;
+  float m_v3d_frame_generation_phase = 1.0f;
+  bool m_v3d_frame_generation_new_frame = true;
+  bool m_v3d_frame_generation_endpoints_valid = false;
   std::vector<u8> m_default_uniform_staging_buffer;
   // User post process:
   PostProcessingConfiguration m_config;

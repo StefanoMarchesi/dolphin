@@ -125,7 +125,8 @@ extern const Info<std::string> GFX_ENHANCE_POST_SHADER;
 // Hidden, default-off mode used only by the experimental V3D upscaler branch.
 // 0=direct, 1=SGSR1 stock, 2=SGSR1 edge-direction, 3=SGSR1 contrast-relative,
 // 4=SGSR2 color-history fallback (temporal history without motion vectors),
-// 5=SGSR1 contrast-relative followed by a light RCAS pass.
+// 5=SGSR1 contrast-relative followed by a light RCAS pass,
+// 6=SGSR2 color-history plus duplicate-VI frame generation (without motion vectors).
 extern const Info<int> GFX_ENHANCE_V3D_UPSCALER_MODE;
 extern const Info<bool> GFX_ENHANCE_FORCE_TRUE_COLOR;
 extern const Info<bool> GFX_ENHANCE_DISABLE_COPY_FILTER;
