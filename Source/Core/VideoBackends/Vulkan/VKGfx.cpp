@@ -4,7 +4,10 @@
 #include "VideoBackends/Vulkan/VKGfx.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <dlfcn.h>
 #include <utility>
 
 #include "Common/CommonTypes.h"
@@ -456,6 +459,18 @@ void VKGfx::SetFramebuffer(AbstractFramebuffer* framebuffer)
 
 void VKGfx::SetAndDiscardFramebuffer(AbstractFramebuffer* framebuffer)
 {
+  if (std::getenv("DOLPHIN_V3D_TRACE_DISCARD") != nullptr)
+  {
+    void* const caller = __builtin_return_address(0);
+    Dl_info info = {};
+    if (dladdr(caller, &info) != 0 && info.dli_fbase)
+    {
+      const auto offset = reinterpret_cast<std::uintptr_t>(caller) -
+                          reinterpret_cast<std::uintptr_t>(info.dli_fbase);
+      std::fprintf(stderr, "V3D-DISCARD caller_offset=0x%zx\n", static_cast<size_t>(offset));
+    }
+  }
+
   if (m_current_framebuffer == framebuffer)
     return;
 
