@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -2843,6 +2845,20 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
                                            bool clamp_top, bool clamp_bottom,
                                            const std::array<u32, 3>& filter_coefficients)
 {
+  if (std::getenv("DOLPHIN_V3D_TRACE_DISCARD") != nullptr)
+  {
+    std::fprintf(stderr,
+                 "V3D-EFB-COPY depth=%u half=%u linear=%u format=%u intensity=%u gamma=%.3f "
+                 "clamp=%u/%u rect=%dx%d filter=%u,%u,%u\n",
+                 static_cast<unsigned int>(is_depth_copy),
+                 static_cast<unsigned int>(scale_by_half),
+                 static_cast<unsigned int>(linear_filter), static_cast<unsigned int>(dst_format),
+                 static_cast<unsigned int>(is_intensity), static_cast<double>(gamma),
+                 static_cast<unsigned int>(clamp_top), static_cast<unsigned int>(clamp_bottom),
+                 src_rect.GetWidth(), src_rect.GetHeight(), filter_coefficients[0],
+                 filter_coefficients[1], filter_coefficients[2]);
+  }
+
   // Flush EFB pokes first, as they're expected to be included.
   g_framebuffer_manager->FlushEFBPokes();
 
