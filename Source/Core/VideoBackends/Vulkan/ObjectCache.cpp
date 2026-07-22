@@ -5,13 +5,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <type_traits>
 
 #include "Common/FileUtil.h"
 #include "Common/LinearDiskCache.h"
 #include "Common/MsgHandler.h"
 
-#include "VideoBackends/Vulkan/CommandBufferManager.h"
 #include "VideoBackends/Vulkan/VKStreamBuffer.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
@@ -477,7 +477,8 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
   // On V3D that turns every short render pass into an additional kernel submission dependency.
   // The experimental path expresses the same attachment ordering in the render pass itself.
   VkSubpassDependency attachment_dependency = {};
-  if (g_command_buffer_mgr->UseV3DFastRenderPass())
+  const bool use_v3d_fast_renderpass = std::getenv("DOLPHIN_V3D_FAST_RENDERPASS") != nullptr;
+  if (use_v3d_fast_renderpass)
   {
     attachment_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     attachment_dependency.dstSubpass = 0;
@@ -494,7 +495,6 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
                                           VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     attachment_dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
   }
-  const bool use_v3d_fast_renderpass = g_command_buffer_mgr->UseV3DFastRenderPass();
   VkRenderPassCreateInfo pass_info = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
                                       nullptr,
                                       0,
