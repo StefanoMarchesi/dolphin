@@ -309,6 +309,7 @@ void CheckForConfigChanges()
   const AspectMode old_suggested_aspect_mode = g_ActiveConfig.suggested_aspect_mode;
   const bool old_widescreen_hack = g_ActiveConfig.bWidescreenHack;
   const auto old_post_processing_shader = g_ActiveConfig.sPostProcessingShader;
+  const bool old_v3d_upscaler_experiment = g_ActiveConfig.bV3DUpscalerExperiment;
   const auto old_hdr = g_ActiveConfig.bHDR;
 
   UpdateActiveConfig();
@@ -361,6 +362,8 @@ void CheckForConfigChanges()
   if (old_widescreen_hack != g_ActiveConfig.bWidescreenHack)
     changed_bits |= CONFIG_CHANGE_BIT_ASPECT_RATIO;
   if (old_post_processing_shader != g_ActiveConfig.sPostProcessingShader)
+    changed_bits |= CONFIG_CHANGE_BIT_POST_PROCESSING_SHADER;
+  if (old_v3d_upscaler_experiment != g_ActiveConfig.bV3DUpscalerExperiment)
     changed_bits |= CONFIG_CHANGE_BIT_POST_PROCESSING_SHADER;
   if (old_hdr != g_ActiveConfig.bHDR)
     changed_bits |= CONFIG_CHANGE_BIT_HDR;
