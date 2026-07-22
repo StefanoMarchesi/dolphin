@@ -462,10 +462,12 @@ void VKTexture::OverrideImageLayout(VkImageLayout new_layout)
   m_layout = new_layout;
 }
 
-void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer, VkImageLayout new_layout) const
+bool VKTexture::PrepareLayoutTransition(VkImageLayout new_layout, VkImageMemoryBarrier* out_barrier,
+                                        VkPipelineStageFlags* out_src_stage_mask,
+                                        VkPipelineStageFlags* out_dst_stage_mask) const
 {
   if (m_layout == new_layout)
-    return;
+    return false;
 
   m_written_since_last_layout_change = false;
 
@@ -603,11 +605,24 @@ void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer, VkImageLayout
   }
   m_compute_layout = ComputeImageLayout::Undefined;
 
-  g_command_buffer_mgr->NotifyPipelineBarrier(V3DBarrierType::ImageLayout);
-  vkCmdPipelineBarrier(command_buffer, srcStageMask, dstStageMask, 0, 0, nullptr, 0, nullptr, 1,
-                       &barrier);
-
   m_layout = new_layout;
+  *out_barrier = barrier;
+  *out_src_stage_mask = srcStageMask;
+  *out_dst_stage_mask = dstStageMask;
+  return true;
+}
+
+void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer, VkImageLayout new_layout) const
+{
+  VkImageMemoryBarrier barrier;
+  VkPipelineStageFlags src_stage_mask;
+  VkPipelineStageFlags dst_stage_mask;
+  if (!PrepareLayoutTransition(new_layout, &barrier, &src_stage_mask, &dst_stage_mask))
+    return;
+
+  g_command_buffer_mgr->NotifyPipelineBarrier(V3DBarrierType::ImageLayout);
+  vkCmdPipelineBarrier(command_buffer, src_stage_mask, dst_stage_mask, 0, 0, nullptr, 0, nullptr, 1,
+                       &barrier);
 }
 
 void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer,
@@ -1175,6 +1190,49 @@ void VKFramebuffer::Unbind()
 void VKFramebuffer::TransitionForRender()
 {
   VkCommandBuffer cb = g_command_buffer_mgr->GetCurrentCommandBuffer();
+  if (std::getenv("DOLPHIN_V3D_BATCH_FB_TRANSITIONS") != nullptr)
+  {
+    std::vector<VkImageMemoryBarrier> barriers;
+    VkPipelineStageFlags src_stage_mask = 0;
+    VkPipelineStageFlags dst_stage_mask = 0;
+    const auto append_transition = [&](VKTexture* texture, VkImageLayout layout) {
+      VkImageMemoryBarrier barrier;
+      VkPipelineStageFlags barrier_src_stage_mask;
+      VkPipelineStageFlags barrier_dst_stage_mask;
+      if (texture->PrepareLayoutTransition(layout, &barrier, &barrier_src_stage_mask,
+                                           &barrier_dst_stage_mask))
+      {
+        barriers.push_back(barrier);
+        src_stage_mask |= barrier_src_stage_mask;
+        dst_stage_mask |= barrier_dst_stage_mask;
+      }
+    };
+
+    if (m_color_attachment)
+    {
+      append_transition(static_cast<VKTexture*>(m_color_attachment),
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    }
+    for (auto* attachment : m_additional_color_attachments)
+    {
+      append_transition(static_cast<VKTexture*>(attachment),
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    }
+    if (m_depth_attachment)
+    {
+      append_transition(static_cast<VKTexture*>(m_depth_attachment),
+                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+    }
+
+    if (!barriers.empty())
+    {
+      g_command_buffer_mgr->NotifyPipelineBarrier(V3DBarrierType::ImageLayout);
+      vkCmdPipelineBarrier(cb, src_stage_mask, dst_stage_mask, 0, 0, nullptr, 0, nullptr,
+                           static_cast<u32>(barriers.size()), barriers.data());
+    }
+    return;
+  }
+
   if (m_color_attachment)
   {
     static_cast<VKTexture*>(m_color_attachment)

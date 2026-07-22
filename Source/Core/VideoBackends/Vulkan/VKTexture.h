@@ -72,6 +72,11 @@ public:
   void PrepareForRenderPass(VkCommandBuffer command_buffer) const;
 
 private:
+  friend class VKFramebuffer;
+
+  bool PrepareLayoutTransition(VkImageLayout new_layout, VkImageMemoryBarrier* barrier,
+                               VkPipelineStageFlags* src_stage_mask,
+                               VkPipelineStageFlags* dst_stage_mask) const;
   bool CreateView(VkImageViewType type);
 
   VmaAllocation m_alloc;
