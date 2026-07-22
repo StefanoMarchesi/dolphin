@@ -45,6 +45,7 @@ TCShaderUid GetShaderUid(EFBCopyFormat dst_format, bool is_depth_copy, bool is_i
   uid_data->scale_by_half = scale_by_half;
   uid_data->all_copy_filter_coefs_needed =
       TextureCacheBase::AllCopyFilterCoefsNeeded(filter_coefficients);
+  uid_data->copy_filter_is_identity = filter_coefficients == std::array<u32, 3>{0, 64, 0};
   uid_data->copy_filter_can_overflow = TextureCacheBase::CopyFilterCanOverflow(filter_coefficients);
   // If the gamma is needed, then include that too.
   uid_data->apply_gamma = gamma_rcp != 1.0f;
@@ -157,7 +158,13 @@ static ShaderCode GenerateCopyShader(APIType api_type, const UidData* uid_data, 
 
   // The copy filter applies to both color and depth copies. This has been verified on hardware.
   // The filter is only applied to the RGB channels, the alpha channel is left intact.
-  if (uid_data->all_copy_filter_coefs_needed)
+  if (uid_data->copy_filter_is_identity)
+  {
+    out.Write("  uint4 current_row = SampleEFB(v_tex0, 0.0f);\n"
+              "  uint4 texcol_raw = uint4(current_row.rgb, {});\n",
+              uid_data->efb_has_alpha ? "current_row.a" : "255");
+  }
+  else if (uid_data->all_copy_filter_coefs_needed)
   {
     out.Write("  uint4 prev_row = SampleEFB(v_tex0, -1.0f);\n"
               "  uint4 current_row = SampleEFB(v_tex0, 0.0f);\n"
@@ -171,10 +178,13 @@ static ShaderCode GenerateCopyShader(APIType api_type, const UidData* uid_data, 
     out.Write("  uint4 current_row = SampleEFB(v_tex0, 0.0f);\n"
               "  uint3 combined_rows = current_row.rgb * filter_coefficients[1];\n");
   }
-  out.Write("  // Shift right by 6 to divide by 64, as filter coefficients\n"
-            "  // that sum to 64 result in no change in brightness\n"
-            "  uint4 texcol_raw = uint4(combined_rows.rgb >> 6, {});\n",
-            uid_data->efb_has_alpha ? "current_row.a" : "255");
+  if (!uid_data->copy_filter_is_identity)
+  {
+    out.Write("  // Shift right by 6 to divide by 64, as filter coefficients\n"
+              "  // that sum to 64 result in no change in brightness\n"
+              "  uint4 texcol_raw = uint4(combined_rows.rgb >> 6, {});\n",
+              uid_data->efb_has_alpha ? "current_row.a" : "255");
+  }
 
   if (uid_data->copy_filter_can_overflow)
     out.Write("  texcol_raw &= 0x1ffu;\n");

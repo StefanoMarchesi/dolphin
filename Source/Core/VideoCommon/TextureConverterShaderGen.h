@@ -26,6 +26,7 @@ struct UidData
   u32 is_intensity : 1;
   u32 scale_by_half : 1;
   u32 all_copy_filter_coefs_needed : 1;
+  u32 copy_filter_is_identity : 1;
   u32 copy_filter_can_overflow : 1;
   u32 apply_gamma : 1;
 };
@@ -58,9 +59,11 @@ struct fmt::formatter<TextureConversionShaderGen::UidData>
     return fmt::format_to(ctx.out(),
                           "dst_format: {}, efb_has_alpha: {}, is_depth_copy: {}, is_intensity: {}, "
                           "scale_by_half: {}, all_copy_filter_coefs_needed: {}, "
-                          "copy_filter_can_overflow: {}, apply_gamma: {}",
+                          "copy_filter_is_identity: {}, copy_filter_can_overflow: {}, "
+                          "apply_gamma: {}",
                           dst_format, uid.efb_has_alpha, uid.is_depth_copy, uid.is_intensity,
                           uid.scale_by_half, uid.all_copy_filter_coefs_needed,
-                          uid.copy_filter_can_overflow, uid.apply_gamma);
+                          uid.copy_filter_is_identity, uid.copy_filter_can_overflow,
+                          uid.apply_gamma);
   }
 };
