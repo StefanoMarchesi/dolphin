@@ -191,13 +191,14 @@ void StateTracker::SetUtilityUniformBuffer(VkBuffer buffer, u32 offset, u32 size
   }
 }
 
-void StateTracker::SetTexture(u32 index, VkImageView view)
+void StateTracker::SetTexture(u32 index, VkImageView view, VkImageLayout layout)
 {
-  if (m_bindings.samplers[index].imageView == view)
+  if (m_bindings.samplers[index].imageView == view &&
+      m_bindings.samplers[index].imageLayout == layout)
     return;
 
   m_bindings.samplers[index].imageView = view;
-  m_bindings.samplers[index].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  m_bindings.samplers[index].imageLayout = layout;
   m_dirty_flags |=
       DIRTY_FLAG_GX_SAMPLERS | DIRTY_FLAG_UTILITY_BINDINGS | DIRTY_FLAG_COMPUTE_BINDINGS;
 }

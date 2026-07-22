@@ -428,13 +428,16 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
   {
     VkAttachmentReference color_reference;
     color_reference.attachment = static_cast<uint32_t>(attachments.size());
-    color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    const VkImageLayout color_layout =
+        std::getenv("DOLPHIN_V3D_PERSISTENT_GENERAL_RT") != nullptr ?
+            VK_IMAGE_LAYOUT_GENERAL :
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color_reference.layout = color_layout;
     color_attachment_references.push_back(std::move(color_reference));
     attachments.push_back({0, color_format, static_cast<VkSampleCountFlagBits>(multisamples),
                            load_op, VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
                            VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+                           color_layout, color_layout});
   }
   if (depth_format != VK_FORMAT_UNDEFINED)
   {
@@ -452,13 +455,16 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
   {
     VkAttachmentReference color_reference;
     color_reference.attachment = static_cast<uint32_t>(attachments.size());
-    color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    const VkImageLayout color_layout =
+        std::getenv("DOLPHIN_V3D_PERSISTENT_GENERAL_RT") != nullptr ?
+            VK_IMAGE_LAYOUT_GENERAL :
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color_reference.layout = color_layout;
     color_attachment_references.push_back(std::move(color_reference));
     attachments.push_back({0, color_format, static_cast<VkSampleCountFlagBits>(multisamples),
                            load_op, VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE,
                            VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+                           color_layout, color_layout});
   }
 
   VkSubpassDescription subpass = {
@@ -476,24 +482,37 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
   // The normal path emits an explicit same-layout image barrier before reusing an attachment.
   // On V3D that turns every short render pass into an additional kernel submission dependency.
   // The experimental path expresses the same attachment ordering in the render pass itself.
-  VkSubpassDependency attachment_dependency = {};
+  std::array<VkSubpassDependency, 2> attachment_dependencies = {};
   const bool use_v3d_fast_renderpass = std::getenv("DOLPHIN_V3D_FAST_RENDERPASS") != nullptr;
+  const bool use_v3d_persistent_general =
+      std::getenv("DOLPHIN_V3D_PERSISTENT_GENERAL_RT") != nullptr;
   if (use_v3d_fast_renderpass)
   {
-    attachment_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    attachment_dependency.dstSubpass = 0;
-    attachment_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    attachment_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                                         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    attachment_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    attachment_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-                                          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    attachment_dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+    auto& inbound = attachment_dependencies[0];
+    inbound.srcSubpass = VK_SUBPASS_EXTERNAL;
+    inbound.dstSubpass = 0;
+    inbound.srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                           VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    inbound.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                           VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                           VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    inbound.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    inbound.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    inbound.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    auto& outbound = attachment_dependencies[1];
+    outbound.srcSubpass = 0;
+    outbound.dstSubpass = VK_SUBPASS_EXTERNAL;
+    outbound.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    outbound.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    outbound.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    outbound.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    outbound.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
   }
   VkRenderPassCreateInfo pass_info = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
                                       nullptr,
@@ -502,8 +521,11 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
                                       attachments.data(),
                                       1,
                                       &subpass,
-                                      use_v3d_fast_renderpass ? 1u : 0u,
-                                      use_v3d_fast_renderpass ? &attachment_dependency : nullptr};
+                                      use_v3d_fast_renderpass ?
+                                          (use_v3d_persistent_general ? 2u : 1u) :
+                                          0u,
+                                      use_v3d_fast_renderpass ? attachment_dependencies.data() :
+                                                                nullptr};
 
   VkRenderPass pass;
   VkResult res = vkCreateRenderPass(g_vulkan_context->GetDevice(), &pass_info, nullptr, &pass);

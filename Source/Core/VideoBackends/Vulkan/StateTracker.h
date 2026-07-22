@@ -39,7 +39,8 @@ public:
   void SetComputeShader(const VKShader* shader);
   void SetGXUniformBuffer(u32 index, VkBuffer buffer, u32 offset, u32 size);
   void SetUtilityUniformBuffer(VkBuffer buffer, u32 offset, u32 size);
-  void SetTexture(u32 index, VkImageView view);
+  void SetTexture(u32 index, VkImageView view,
+                  VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
   void SetSampler(u32 index, VkSampler sampler);
   void SetSSBO(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range);
   void SetTexelBuffer(u32 index, VkBufferView view);

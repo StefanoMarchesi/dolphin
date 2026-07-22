@@ -509,7 +509,12 @@ void VKGfx::SetTexture(u32 index, const AbstractTexture* texture)
   const VKTexture* tex = static_cast<const VKTexture*>(texture);
   if (tex)
   {
-    if (tex->GetLayout() != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+    const bool persistent_general =
+        std::getenv("DOLPHIN_V3D_PERSISTENT_GENERAL_RT") != nullptr &&
+        tex->GetConfig().IsRenderTarget();
+    const VkImageLayout sampled_layout =
+        persistent_general ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if (tex->GetLayout() != sampled_layout)
     {
       if (StateTracker::GetInstance()->InRenderPass())
       {
@@ -517,11 +522,10 @@ void VKGfx::SetTexture(u32 index, const AbstractTexture* texture)
         StateTracker::GetInstance()->EndRenderPass();
       }
 
-      tex->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(),
-                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      tex->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(), sampled_layout);
     }
 
-    StateTracker::GetInstance()->SetTexture(index, tex->GetView());
+    StateTracker::GetInstance()->SetTexture(index, tex->GetView(), sampled_layout);
   }
   else
   {

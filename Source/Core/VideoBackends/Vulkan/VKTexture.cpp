@@ -449,6 +449,12 @@ void VKTexture::Load(u32 level, u32 width, u32 height, u32 row_length, const u8*
 
 void VKTexture::FinishedRendering()
 {
+  if (std::getenv("DOLPHIN_V3D_PERSISTENT_GENERAL_RT") != nullptr &&
+      m_config.IsRenderTarget() && m_layout == VK_IMAGE_LAYOUT_GENERAL)
+  {
+    StateTracker::GetInstance()->EndRenderPass();
+    return;
+  }
   if (m_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
     return;
 
@@ -509,6 +515,13 @@ bool VKTexture::PrepareLayoutTransition(VkImageLayout new_layout, VkImageMemoryB
     srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     break;
 
+  case VK_IMAGE_LAYOUT_GENERAL:
+    barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    srcStageMask =
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    break;
+
   case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
     // Image was being used as a depthstencil attachment, so ensure all writes have completed.
     barrier.srcAccessMask =
@@ -551,6 +564,13 @@ bool VKTexture::PrepareLayoutTransition(VkImageLayout new_layout, VkImageMemoryB
     barrier.dstAccessMask =
         VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    break;
+
+  case VK_IMAGE_LAYOUT_GENERAL:
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dstStageMask =
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     break;
 
   case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
@@ -734,7 +754,8 @@ void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer,
 void VKTexture::PrepareForRenderPass(VkCommandBuffer command_buffer) const
 {
   // Should only be used on images that are already in the layout for being rendered to
-  ASSERT(m_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ||
+  ASSERT(m_layout == VK_IMAGE_LAYOUT_GENERAL ||
+         m_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ||
          m_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
   if (m_written_since_last_layout_change)
   {
@@ -1190,6 +1211,10 @@ void VKFramebuffer::Unbind()
 void VKFramebuffer::TransitionForRender()
 {
   VkCommandBuffer cb = g_command_buffer_mgr->GetCurrentCommandBuffer();
+  const VkImageLayout color_layout =
+      std::getenv("DOLPHIN_V3D_PERSISTENT_GENERAL_RT") != nullptr ?
+          VK_IMAGE_LAYOUT_GENERAL :
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   if (std::getenv("DOLPHIN_V3D_BATCH_FB_TRANSITIONS") != nullptr)
   {
     std::vector<VkImageMemoryBarrier> barriers;
@@ -1210,13 +1235,11 @@ void VKFramebuffer::TransitionForRender()
 
     if (m_color_attachment)
     {
-      append_transition(static_cast<VKTexture*>(m_color_attachment),
-                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+      append_transition(static_cast<VKTexture*>(m_color_attachment), color_layout);
     }
     for (auto* attachment : m_additional_color_attachments)
     {
-      append_transition(static_cast<VKTexture*>(attachment),
-                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+      append_transition(static_cast<VKTexture*>(attachment), color_layout);
     }
     if (m_depth_attachment)
     {
@@ -1235,13 +1258,11 @@ void VKFramebuffer::TransitionForRender()
 
   if (m_color_attachment)
   {
-    static_cast<VKTexture*>(m_color_attachment)
-        ->TransitionToLayout(cb, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    static_cast<VKTexture*>(m_color_attachment)->TransitionToLayout(cb, color_layout);
   }
   for (auto* attachment : m_additional_color_attachments)
   {
-    static_cast<VKTexture*>(attachment)
-        ->TransitionToLayout(cb, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    static_cast<VKTexture*>(attachment)->TransitionToLayout(cb, color_layout);
   }
 
   if (m_depth_attachment)
