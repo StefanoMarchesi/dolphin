@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 
 #include "Common/Assert.h"
 #include "Common/Logging/Log.h"
@@ -382,6 +383,29 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
                    requested, queued, waits, wait_us, submit_us, rp_begin, rp_end, rp_types[0],
                    rp_types[1], rp_types[2], barriers, barrier_types[0], barrier_types[1],
                    barrier_types[2], barrier_types[3], barrier_types[4]);
+      std::fprintf(stderr,
+                   "V3D-PERF-RAW frames=60 requested_submits=%llu queue_submits=%llu "
+                   "fence_waits=%llu fence_wait_us=%llu queue_submit_us=%llu "
+                   "render_passes=%llu/%llu rp_load=%llu rp_discard=%llu rp_clear=%llu "
+                   "barriers=%llu barrier_staging=%llu barrier_layout=%llu "
+                   "barrier_compute=%llu barrier_hazard=%llu barrier_image=%llu\n",
+                   static_cast<unsigned long long>(requested),
+                   static_cast<unsigned long long>(queued),
+                   static_cast<unsigned long long>(waits),
+                   static_cast<unsigned long long>(wait_us),
+                   static_cast<unsigned long long>(submit_us),
+                   static_cast<unsigned long long>(rp_begin),
+                   static_cast<unsigned long long>(rp_end),
+                   static_cast<unsigned long long>(rp_types[0]),
+                   static_cast<unsigned long long>(rp_types[1]),
+                   static_cast<unsigned long long>(rp_types[2]),
+                   static_cast<unsigned long long>(barriers),
+                   static_cast<unsigned long long>(barrier_types[0]),
+                   static_cast<unsigned long long>(barrier_types[1]),
+                   static_cast<unsigned long long>(barrier_types[2]),
+                   static_cast<unsigned long long>(barrier_types[3]),
+                   static_cast<unsigned long long>(barrier_types[4]));
+      std::fflush(stderr);
     }
     m_current_frame = (m_current_frame + 1) % NUM_FRAMES_IN_FLIGHT;
 
