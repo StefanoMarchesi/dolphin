@@ -397,6 +397,27 @@ void HotkeyScheduler::Run()
         }
       }
 
+      if (IsHotkey(HK_V3D_CYCLE_UPSCALER_MODE))
+      {
+        // Keep this value session-local. Config::SetCurrent also guarantees
+        // that neither the user's IR nor the experimental gate is persisted.
+        static int direct_efb_scale = 1;
+        const bool enable = !Config::Get(Config::GFX_ENHANCE_V3D_UPSCALER_EXPERIMENT);
+        if (enable)
+        {
+          direct_efb_scale = Config::Get(Config::GFX_EFB_SCALE);
+          Config::SetCurrent(Config::GFX_EFB_SCALE, 1);
+          Config::SetCurrent(Config::GFX_ENHANCE_V3D_UPSCALER_EXPERIMENT, true);
+          OSD::AddMessage("V3D Upscaler: SGSR1 Performance (1x -> output)");
+        }
+        else
+        {
+          Config::SetCurrent(Config::GFX_ENHANCE_V3D_UPSCALER_EXPERIMENT, false);
+          Config::SetCurrent(Config::GFX_EFB_SCALE, direct_efb_scale);
+          OSD::AddMessage(fmt::format("V3D Upscaler: Direct ({}x)", direct_efb_scale));
+        }
+      }
+
       if (IsHotkey(HK_TOGGLE_CROP_TO_ASPECT_RATIO))
       {
         Config::SetCurrent(Config::GFX_CROP_TO_ASPECT_RATIO,

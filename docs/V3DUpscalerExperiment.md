@@ -23,6 +23,13 @@ This is a spatial SGSR1 integration only. AMD Optical Flow, mip-1 scene-change
 detection, SGSR2 temporal history, and frame generation are not connected to
 Dolphin yet.
 
+The hotkey configuration contains a dedicated `V3D Experiment` group. Its
+`Cycle V3D Upscaler Mode` action currently switches, at runtime, between the
+unchanged Direct path at the user's current internal resolution and SGSR1 at
+native 1x. Both changes use Dolphin's session layer and therefore do not modify
+the saved graphics configuration. The same action will gain SGSR2 and
+SGSR2+frame-generation states only after those paths pass their runtime gates.
+
 Before exposing the setting in the UI:
 
 1. implement only the Vulkan backend first;
