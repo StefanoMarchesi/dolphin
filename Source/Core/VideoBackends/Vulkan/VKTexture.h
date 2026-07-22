@@ -44,6 +44,11 @@ public:
                                 const MathUtil::Rectangle<int>& src_rect, u32 src_layer,
                                 u32 src_level, const MathUtil::Rectangle<int>& dst_rect,
                                 u32 dst_layer, u32 dst_level) override;
+  bool BlitRectangleFromTexture(const AbstractTexture* src,
+                                const MathUtil::Rectangle<int>& src_rect,
+                                const MathUtil::Rectangle<int>& dst_rect, bool linear_filter,
+                                bool sample_red_as_rgba) override;
+  void ResetSamplingView() override;
   void ResolveFromTexture(const AbstractTexture* src, const MathUtil::Rectangle<int>& rect,
                           u32 layer, u32 level) override;
   void Load(u32 level, u32 width, u32 height, u32 row_length, const u8* buffer, size_t buffer_size,
@@ -51,7 +56,7 @@ public:
   void FinishedRendering() override;
 
   VkImage GetImage() const { return m_image; }
-  VkImageView GetView() const { return m_view; }
+  VkImageView GetView() const { return m_sample_view != VK_NULL_HANDLE ? m_sample_view : m_view; }
   VkImageLayout GetLayout() const { return m_layout; }
   VkFormat GetVkFormat() const { return GetVkFormatForHostTextureFormat(m_config.format); }
   bool IsAdopted() const { return m_alloc != VmaAllocation(VK_NULL_HANDLE); }
@@ -78,10 +83,12 @@ private:
                                VkPipelineStageFlags* src_stage_mask,
                                VkPipelineStageFlags* dst_stage_mask) const;
   bool CreateView(VkImageViewType type);
+  bool CreateRedSampleView();
 
   VmaAllocation m_alloc;
   VkImage m_image;
   VkImageView m_view = VK_NULL_HANDLE;
+  VkImageView m_sample_view = VK_NULL_HANDLE;
   mutable VkImageLayout m_layout = VK_IMAGE_LAYOUT_UNDEFINED;
   mutable ComputeImageLayout m_compute_layout = ComputeImageLayout::Undefined;
   mutable bool m_written_since_last_layout_change = false;

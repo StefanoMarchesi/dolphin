@@ -46,6 +46,11 @@ VKTexture::VKTexture(const TextureConfig& tex_config, VmaAllocation alloc, VkIma
 
 VKTexture::~VKTexture()
 {
+  if (m_sample_view != VK_NULL_HANDLE)
+  {
+    StateTracker::GetInstance()->UnbindTexture(m_sample_view);
+    g_command_buffer_mgr->DeferImageViewDestruction(m_sample_view);
+  }
   StateTracker::GetInstance()->UnbindTexture(m_view);
   g_command_buffer_mgr->DeferImageViewDestruction(m_view);
 
@@ -165,6 +170,31 @@ bool VKTexture::CreateView(VkImageViewType type)
     return false;
   }
 
+  return true;
+}
+
+bool VKTexture::CreateRedSampleView()
+{
+  if (m_sample_view != VK_NULL_HANDLE)
+    return true;
+
+  const VkImageViewCreateInfo view_info = {
+      VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+      nullptr,
+      0,
+      m_image,
+      VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+      GetVkFormat(),
+      {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R,
+       VK_COMPONENT_SWIZZLE_R},
+      {GetImageViewAspectForFormat(GetFormat()), 0, GetLevels(), 0, GetLayers()}};
+  const VkResult res =
+      vkCreateImageView(g_vulkan_context->GetDevice(), &view_info, nullptr, &m_sample_view);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "vkCreateImageView (red sample view) failed: ");
+    return false;
+  }
   return true;
 }
 
@@ -317,6 +347,48 @@ void VKTexture::CopyRectangleFromTexture(const AbstractTexture* src,
 
   // Only restore the source layout. Destination is restored by FinishedRendering().
   src_texture->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(), old_src_layout);
+}
+
+bool VKTexture::BlitRectangleFromTexture(const AbstractTexture* src,
+                                         const MathUtil::Rectangle<int>& src_rect,
+                                         const MathUtil::Rectangle<int>& dst_rect,
+                                         bool linear_filter, bool sample_red_as_rgba)
+{
+  const VKTexture* src_texture = static_cast<const VKTexture*>(src);
+  if (src_texture->GetFormat() != GetFormat() || src_texture->GetSamples() != 1 || GetSamples() != 1)
+    return false;
+  if (sample_red_as_rgba && !CreateRedSampleView())
+    return false;
+
+  StateTracker::GetInstance()->EndRenderPass();
+  const VkImageLayout old_src_layout = src_texture->GetLayout();
+  src_texture->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(),
+                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+  TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(),
+                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+  VkImageBlit blit = {};
+  blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  blit.srcOffsets[0] = {src_rect.left, src_rect.top, 0};
+  blit.srcOffsets[1] = {src_rect.right, src_rect.bottom, 1};
+  blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  blit.dstOffsets[0] = {dst_rect.left, dst_rect.top, 0};
+  blit.dstOffsets[1] = {dst_rect.right, dst_rect.bottom, 1};
+  vkCmdBlitImage(g_command_buffer_mgr->GetCurrentCommandBuffer(), src_texture->m_image,
+                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_image,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                 linear_filter ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+  src_texture->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(), old_src_layout);
+  return true;
+}
+
+void VKTexture::ResetSamplingView()
+{
+  if (m_sample_view == VK_NULL_HANDLE)
+    return;
+  StateTracker::GetInstance()->UnbindTexture(m_sample_view);
+  g_command_buffer_mgr->DeferImageViewDestruction(m_sample_view);
+  m_sample_view = VK_NULL_HANDLE;
 }
 
 void VKTexture::ResolveFromTexture(const AbstractTexture* src, const MathUtil::Rectangle<int>& rect,

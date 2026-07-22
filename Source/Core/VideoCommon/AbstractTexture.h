@@ -27,6 +27,15 @@ public:
                                         const MathUtil::Rectangle<int>& src_rect, u32 src_layer,
                                         u32 src_level, const MathUtil::Rectangle<int>& dst_rect,
                                         u32 dst_layer, u32 dst_level) = 0;
+  // Optional backend fast path for scaled copies. Returns false when unsupported.
+  virtual bool BlitRectangleFromTexture(const AbstractTexture* src,
+                                        const MathUtil::Rectangle<int>& src_rect,
+                                        const MathUtil::Rectangle<int>& dst_rect, bool linear_filter,
+                                        bool sample_red_as_rgba)
+  {
+    return false;
+  }
+  virtual void ResetSamplingView() {}
   virtual void ResolveFromTexture(const AbstractTexture* src, const MathUtil::Rectangle<int>& rect,
                                   u32 layer, u32 level) = 0;
   virtual void Load(u32 level, u32 width, u32 height, u32 row_length, const u8* buffer,

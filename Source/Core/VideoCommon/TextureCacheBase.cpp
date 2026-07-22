@@ -2705,6 +2705,7 @@ RcTcacheEntry TextureCacheBase::AllocateCacheEntry(const TextureConfig& config)
   if (!alloc)
     return {};
 
+  alloc->texture->ResetSamplingView();
   auto cacheEntry =
       std::make_shared<TCacheEntry>(std::move(alloc->texture), std::move(alloc->framebuffer));
   cacheEntry->textures_by_hash_iter = m_textures_by_hash.end();
@@ -2937,6 +2938,23 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
                       g_framebuffer_manager->ResolveEFBColorTexture(framebuffer_rect);
 
   const MathUtil::Rectangle<int> destination_rect = entry->texture->GetRect();
+  const bool use_red_blit =
+      std::getenv("DOLPHIN_V3D_BLIT_R8_EFB_COPY") != nullptr &&
+      dst_format == EFBCopyFormat::R8 && !is_depth_copy && !is_intensity && scale_by_half &&
+      linear_filter && gamma == 1.0f && filter_coefficients == std::array<u32, 3>{0, 64, 0} &&
+      src_texture->GetLayers() == 1 && entry->texture->GetLayers() == 1;
+  if (use_red_blit && entry->texture->BlitRectangleFromTexture(
+                          src_texture, framebuffer_rect, destination_rect, true, true))
+  {
+    if (std::getenv("DOLPHIN_V3D_TRACE_DISCARD") != nullptr)
+    {
+      std::fprintf(stderr, "V3D-EFB-BLIT-R8 src=%dx%d dst=%dx%d\n",
+                   framebuffer_rect.GetWidth(), framebuffer_rect.GetHeight(),
+                   destination_rect.GetWidth(), destination_rect.GetHeight());
+    }
+    entry->texture->FinishedRendering();
+    return;
+  }
   if (use_transfer_copy && framebuffer_rect.GetWidth() == destination_rect.GetWidth() &&
       framebuffer_rect.GetHeight() == destination_rect.GetHeight())
   {
