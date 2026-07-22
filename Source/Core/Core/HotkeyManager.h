@@ -187,6 +187,9 @@ enum Hotkey
   HK_SKYLANDERS_PORTAL,
   HK_INFINITY_BASE,
 
+  // Appended to preserve the numeric IDs of all existing hotkeys.
+  HK_V3D_CYCLE_UPSCALER_MODE,
+
   NUM_HOTKEYS,
 };
 
@@ -219,6 +222,7 @@ enum HotkeyGroup : int
   HKGP_GBA_VOLUME,
   HKGP_GBA_SIZE,
   HKGP_USB_EMU,
+  HKGP_V3D_EXPERIMENT,
 
   NUM_HOTKEY_GROUPS,
 };
