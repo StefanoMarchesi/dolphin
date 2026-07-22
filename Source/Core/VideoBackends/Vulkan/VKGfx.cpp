@@ -619,6 +619,22 @@ void VKGfx::Draw(u32 base_vertex, u32 num_vertices)
   if (!StateTracker::GetInstance()->Bind())
     return;
 
+  if (std::getenv("DOLPHIN_V3D_TRACE_DRAW_VIEWPORT") != nullptr)
+  {
+    const auto* const tracker = StateTracker::GetInstance();
+    const auto& viewport = tracker->GetViewport();
+    const auto& scissor = tracker->GetScissor();
+    const auto* const framebuffer = tracker->GetFramebuffer();
+    std::fprintf(stderr,
+                 "V3D-DRAW indexed=0 vertices=%u fb=%ux%u viewport=%.1f,%.1f,%.1f,%.1f "
+                 "scissor=%d,%d,%u,%u\n",
+                 num_vertices, framebuffer ? framebuffer->GetWidth() : 0,
+                 framebuffer ? framebuffer->GetHeight() : 0, static_cast<double>(viewport.x),
+                 static_cast<double>(viewport.y), static_cast<double>(viewport.width),
+                 static_cast<double>(viewport.height), scissor.offset.x, scissor.offset.y,
+                 scissor.extent.width, scissor.extent.height);
+  }
+
   vkCmdDraw(g_command_buffer_mgr->GetCurrentCommandBuffer(), num_vertices, 1, base_vertex, 0);
 }
 
@@ -626,6 +642,22 @@ void VKGfx::DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex)
 {
   if (!StateTracker::GetInstance()->Bind())
     return;
+
+  if (std::getenv("DOLPHIN_V3D_TRACE_DRAW_VIEWPORT") != nullptr)
+  {
+    const auto* const tracker = StateTracker::GetInstance();
+    const auto& viewport = tracker->GetViewport();
+    const auto& scissor = tracker->GetScissor();
+    const auto* const framebuffer = tracker->GetFramebuffer();
+    std::fprintf(stderr,
+                 "V3D-DRAW indexed=1 vertices=%u fb=%ux%u viewport=%.1f,%.1f,%.1f,%.1f "
+                 "scissor=%d,%d,%u,%u\n",
+                 num_indices, framebuffer ? framebuffer->GetWidth() : 0,
+                 framebuffer ? framebuffer->GetHeight() : 0, static_cast<double>(viewport.x),
+                 static_cast<double>(viewport.y), static_cast<double>(viewport.width),
+                 static_cast<double>(viewport.height), scissor.offset.x, scissor.offset.y,
+                 scissor.extent.width, scissor.extent.height);
+  }
 
   vkCmdDrawIndexed(g_command_buffer_mgr->GetCurrentCommandBuffer(), num_indices, 1, base_index,
                    base_vertex, 0);
