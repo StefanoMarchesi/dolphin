@@ -2944,7 +2944,7 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
     {
       std::fprintf(stderr, "V3D-EFB-TRANSFER size=%dx%d pixel_format=%u layers=%u\n",
                    framebuffer_rect.GetWidth(), framebuffer_rect.GetHeight(),
-                   static_cast<u32>(bpmem.zcontrol.pixel_format),
+                   static_cast<u32>(static_cast<PixelFormat>(bpmem.zcontrol.pixel_format)),
                    std::min(src_texture->GetLayers(), entry->texture->GetLayers()));
     }
     const u32 layers = std::min(src_texture->GetLayers(), entry->texture->GetLayers());
