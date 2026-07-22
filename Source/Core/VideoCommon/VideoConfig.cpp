@@ -151,7 +151,7 @@ void VideoConfig::Refresh()
   iMaxAnisotropy = Config::Get(Config::GFX_ENHANCE_MAX_ANISOTROPY);
   output_resampling_mode = Config::Get(Config::GFX_ENHANCE_OUTPUT_RESAMPLING);
   sPostProcessingShader = Config::Get(Config::GFX_ENHANCE_POST_SHADER);
-  bV3DUpscalerExperiment = Config::Get(Config::GFX_ENHANCE_V3D_UPSCALER_EXPERIMENT);
+  iV3DUpscalerMode = Config::Get(Config::GFX_ENHANCE_V3D_UPSCALER_MODE);
   bForceTrueColor = Config::Get(Config::GFX_ENHANCE_FORCE_TRUE_COLOR);
   bDisableCopyFilter = Config::Get(Config::GFX_ENHANCE_DISABLE_COPY_FILTER);
   bArbitraryMipmapDetection = Config::Get(Config::GFX_ENHANCE_ARBITRARY_MIPMAP_DETECTION);
@@ -309,7 +309,7 @@ void CheckForConfigChanges()
   const AspectMode old_suggested_aspect_mode = g_ActiveConfig.suggested_aspect_mode;
   const bool old_widescreen_hack = g_ActiveConfig.bWidescreenHack;
   const auto old_post_processing_shader = g_ActiveConfig.sPostProcessingShader;
-  const bool old_v3d_upscaler_experiment = g_ActiveConfig.bV3DUpscalerExperiment;
+  const int old_v3d_upscaler_mode = g_ActiveConfig.iV3DUpscalerMode;
   const auto old_hdr = g_ActiveConfig.bHDR;
 
   UpdateActiveConfig();
@@ -363,7 +363,7 @@ void CheckForConfigChanges()
     changed_bits |= CONFIG_CHANGE_BIT_ASPECT_RATIO;
   if (old_post_processing_shader != g_ActiveConfig.sPostProcessingShader)
     changed_bits |= CONFIG_CHANGE_BIT_POST_PROCESSING_SHADER;
-  if (old_v3d_upscaler_experiment != g_ActiveConfig.bV3DUpscalerExperiment)
+  if (old_v3d_upscaler_mode != g_ActiveConfig.iV3DUpscalerMode)
     changed_bits |= CONFIG_CHANGE_BIT_POST_PROCESSING_SHADER;
   if (old_hdr != g_ActiveConfig.bHDR)
     changed_bits |= CONFIG_CHANGE_BIT_HDR;

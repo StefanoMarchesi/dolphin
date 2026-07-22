@@ -9,26 +9,33 @@ backend implementation is connected. Test builds can opt in through `GFX.ini`:
 
 ```ini
 [Enhancements]
-V3DUpscalerExperiment = True
+V3DUpscalerMode = 1
 ```
 
-The active value is available as
-`g_ActiveConfig.bV3DUpscalerExperiment`. On Vulkan, enabling it with no explicit
-post-processing shader selects the bundled `V3D_SGSR1` presentation shader.
-An explicitly selected user shader takes priority. Other backends and the
-disabled setting retain the existing output path; a missing or failed shader
-falls back through Dolphin's normal post-processing fallback.
+The active value is available as `g_ActiveConfig.iV3DUpscalerMode`. On Vulkan,
+mode 1 selects bundled SGSR1 stock, mode 2 selects its edge-direction weighting
+variant, mode 3 selects multi-channel contrast-relative edge detection, mode 4
+selects the SGSR2-inspired color-history experiment, and mode 5 adds a separate
+lightweight RCAS pass after mode 3. Mode 0 is the unchanged direct path. An
+explicitly selected user shader takes priority. Other backends and mode 0 retain
+the existing output path; a missing or failed shader falls back through
+Dolphin's normal post-processing fallback.
 
-This is a spatial SGSR1 integration only. AMD Optical Flow, mip-1 scene-change
-detection, SGSR2 temporal history, and frame generation are not connected to
-Dolphin yet.
+Mode 4 uses persistent RGBA16F ping-pong history, variance clipping, adaptive
+history alpha, reactive rejection, and a compact thin-feature lock. It is
+deliberately labelled `SGSR2 Color History, no motion`: Dolphin does not expose
+game motion vectors to presentation, so this is not the complete Qualcomm
+SGSR2 algorithm and does not perform motion-vector reprojection. It resets its
+history on source/output resize, shader change, pipeline change, and a frame
+gap longer than 250 ms. AMD Optical Flow, robust camera-cut detection, full
+SGSR2 motion/depth handling, and frame generation are not connected yet.
 
 The hotkey configuration contains a dedicated `V3D Experiment` group. Its
-`Cycle V3D Upscaler Mode` action currently switches, at runtime, between the
-unchanged Direct path at the user's current internal resolution and SGSR1 at
-native 1x. Both changes use Dolphin's session layer and therefore do not modify
-the saved graphics configuration. The same action will gain SGSR2 and
-SGSR2+frame-generation states only after those paths pass their runtime gates.
+`Cycle V3D Upscaler Mode` action currently switches at runtime through Direct,
+SGSR1 stock, SGSR1 edge-direction, SGSR1 contrast-relative, SGSR2 color-history,
+and SGSR1 contrast-relative plus light RCAS. The experimental modes use native
+1x. All changes use Dolphin's session layer and therefore do not modify the
+saved graphics configuration.
 
 Before exposing the setting in the UI:
 

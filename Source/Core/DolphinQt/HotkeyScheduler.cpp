@@ -400,21 +400,37 @@ void HotkeyScheduler::Run()
       if (IsHotkey(HK_V3D_CYCLE_UPSCALER_MODE))
       {
         // Keep this value session-local. Config::SetCurrent also guarantees
-        // that neither the user's IR nor the experimental gate is persisted.
+        // that neither the user's IR nor the experimental mode is persisted.
         static int direct_efb_scale = 1;
-        const bool enable = !Config::Get(Config::GFX_ENHANCE_V3D_UPSCALER_EXPERIMENT);
-        if (enable)
+        const int old_mode = Config::Get(Config::GFX_ENHANCE_V3D_UPSCALER_MODE);
+        const int new_mode = (old_mode + 1) % 6;
+        if (old_mode == 0)
         {
           direct_efb_scale = Config::Get(Config::GFX_EFB_SCALE);
           Config::SetCurrent(Config::GFX_EFB_SCALE, 1);
-          Config::SetCurrent(Config::GFX_ENHANCE_V3D_UPSCALER_EXPERIMENT, true);
-          OSD::AddMessage("V3D Upscaler: SGSR1 Performance (1x -> output)");
         }
-        else
+        Config::SetCurrent(Config::GFX_ENHANCE_V3D_UPSCALER_MODE, new_mode);
+        switch (new_mode)
         {
-          Config::SetCurrent(Config::GFX_ENHANCE_V3D_UPSCALER_EXPERIMENT, false);
+        case 0:
           Config::SetCurrent(Config::GFX_EFB_SCALE, direct_efb_scale);
           OSD::AddMessage(fmt::format("V3D Upscaler: Direct ({}x)", direct_efb_scale));
+          break;
+        case 1:
+          OSD::AddMessage("V3D Upscaler: SGSR1 Stock (1x -> output)");
+          break;
+        case 2:
+          OSD::AddMessage("V3D Upscaler: SGSR1 Edge Direction (1x -> output)");
+          break;
+        case 3:
+          OSD::AddMessage("V3D Upscaler: SGSR1 Contrast Relative (1x -> output)");
+          break;
+        case 4:
+          OSD::AddMessage("V3D Upscaler: SGSR2 Color History, no motion (1x -> output)");
+          break;
+        case 5:
+          OSD::AddMessage("V3D Upscaler: SGSR1 Contrast + Light RCAS (1x -> output)");
+          break;
         }
       }
 

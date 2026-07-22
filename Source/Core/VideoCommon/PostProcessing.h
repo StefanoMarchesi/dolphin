@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <map>
 #include <memory>
 #include <string>
@@ -139,8 +140,18 @@ protected:
   std::unique_ptr<AbstractShader> m_default_vertex_shader;
   std::unique_ptr<AbstractShader> m_default_pixel_shader;
   std::unique_ptr<AbstractPipeline> m_default_pipeline;
+  std::unique_ptr<AbstractPipeline> m_v3d_history_copy_pipeline;
+  std::unique_ptr<AbstractShader> m_v3d_rcas_pixel_shader;
+  std::unique_ptr<AbstractPipeline> m_v3d_rcas_pipeline;
   std::unique_ptr<AbstractFramebuffer> m_intermediary_frame_buffer;
   std::unique_ptr<AbstractTexture> m_intermediary_color_texture;
+  std::array<std::unique_ptr<AbstractFramebuffer>, 2> m_v3d_history_frame_buffers;
+  std::array<std::unique_ptr<AbstractTexture>, 2> m_v3d_history_textures;
+  u32 m_v3d_history_write_index = 0;
+  u32 m_v3d_history_source_width = 0;
+  u32 m_v3d_history_source_height = 0;
+  u64 m_v3d_history_last_time_ms = 0;
+  bool m_v3d_history_valid = false;
   std::vector<u8> m_default_uniform_staging_buffer;
   // User post process:
   PostProcessingConfiguration m_config;
