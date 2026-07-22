@@ -3,6 +3,7 @@
 
 #include "VideoCommon/PostProcessing.h"
 
+#include <array>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -35,7 +36,9 @@ namespace VideoCommon
 {
 static const char s_empty_pixel_shader[] = "void main() { SetOutput(Sample()); }\n";
 static const char s_default_pixel_shader_name[] = "default_pre_post_process";
-static const char s_v3d_upscaler_shader_name[] = "V3D_SGSR1";
+static constexpr std::array<const char*, 5> s_v3d_upscaler_shader_names = {
+    "V3D_SGSR1", "V3D_SGSR1_Edge", "V3D_SGSR1_Contrast", "V3D_SGSR2_ColorHistory",
+    "V3D_SGSR1_Contrast"};
 // Keep the highest quality possible to avoid losing quality on subtle gamma conversions.
 // RGBA16F should have enough quality even if we store colors in gamma space on it.
 static const AbstractTextureFormat s_intermediary_buffer_format = AbstractTextureFormat::RGBA16F;
@@ -435,11 +438,21 @@ void PostProcessing::RecompileShader()
   // and pipelines even if there might not be need to.
 
   m_default_pipeline.reset();
+  m_v3d_history_copy_pipeline.reset();
+  m_v3d_rcas_pipeline.reset();
   m_pipeline.reset();
   m_default_pixel_shader.reset();
   m_pixel_shader.reset();
+  m_v3d_rcas_pixel_shader.reset();
   m_default_vertex_shader.reset();
   m_vertex_shader.reset();
+  m_v3d_history_frame_buffers = {};
+  m_v3d_history_textures = {};
+  m_v3d_history_write_index = 0;
+  m_v3d_history_source_width = 0;
+  m_v3d_history_source_height = 0;
+  m_v3d_history_last_time_ms = 0;
+  m_v3d_history_valid = false;
   if (!CompilePixelShader())
     return;
   if (!CompileVertexShader())
@@ -451,7 +464,13 @@ void PostProcessing::RecompileShader()
 void PostProcessing::RecompilePipeline()
 {
   m_default_pipeline.reset();
+  m_v3d_history_copy_pipeline.reset();
+  m_v3d_rcas_pipeline.reset();
   m_pipeline.reset();
+  m_v3d_history_frame_buffers = {};
+  m_v3d_history_textures = {};
+  m_v3d_history_write_index = 0;
+  m_v3d_history_valid = false;
   CompilePipeline();
 }
 
@@ -502,6 +521,142 @@ void PostProcessing::BlitFromTexture(const MathUtil::Rectangle<int>& dst,
   std::vector<u8>* uniform_staging_buffer = &m_default_uniform_staging_buffer;
   bool default_uniform_staging_buffer = true;
   const MathUtil::Rectangle<int> present_rect = g_presenter->GetTargetRectangle();
+
+  // SGSR1 contrast-relative followed by a separate lightweight RCAS pass. The first pass writes
+  // RGBA16F so sharpening does not amplify quantization introduced between the two filters.
+  if (g_ActiveConfig.iV3DUpscalerMode == 5 &&
+      g_backend_info.api_type == APIType::Vulkan && m_v3d_rcas_pipeline &&
+      (!copy_all_layers || src_tex->GetLayers() == 1) && present_rect.GetWidth() > 0 &&
+      present_rect.GetHeight() > 0)
+  {
+    AbstractFramebuffer* const output_framebuffer = g_gfx->GetCurrentFramebuffer();
+    const u32 target_width = static_cast<u32>(present_rect.GetWidth());
+    const u32 target_height = static_cast<u32>(present_rect.GetHeight());
+    if (!m_intermediary_color_texture || !m_intermediary_frame_buffer ||
+        m_intermediary_color_texture->GetWidth() != target_width ||
+        m_intermediary_color_texture->GetHeight() != target_height ||
+        m_intermediary_color_texture->GetLayers() != 1)
+    {
+      const TextureConfig intermediary_config(target_width, target_height, 1, 1, 1,
+                                                s_intermediary_buffer_format,
+                                                AbstractTextureFlag_RenderTarget,
+                                                AbstractTextureType::Texture_2DArray);
+      m_intermediary_color_texture =
+          g_gfx->CreateTexture(intermediary_config, "V3D SGSR1 RCAS intermediary");
+      m_intermediary_frame_buffer =
+          g_gfx->CreateFramebuffer(m_intermediary_color_texture.get(), nullptr);
+    }
+
+    if (m_intermediary_color_texture && m_intermediary_frame_buffer)
+    {
+      g_gfx->SetFramebuffer(m_intermediary_frame_buffer.get());
+      g_gfx->SetTexture(0, src_tex);
+      g_gfx->SetTexture(1, src_tex);
+      FillUniformBuffer(src_rect, src_tex, src_layer, m_intermediary_frame_buffer->GetRect(),
+                        present_rect, m_uniform_staging_buffer.data(), true, false);
+      g_vertex_manager->UploadUtilityUniforms(m_uniform_staging_buffer.data(),
+                                              static_cast<u32>(m_uniform_staging_buffer.size()));
+      g_gfx->SetViewportAndScissor(g_gfx->ConvertFramebufferRectangle(
+          m_intermediary_color_texture->GetRect(), m_intermediary_frame_buffer.get()));
+      g_gfx->SetPipeline(m_pipeline.get());
+      g_gfx->Draw(0, 3);
+
+      g_gfx->SetFramebuffer(output_framebuffer);
+      g_gfx->SetTexture(0, m_intermediary_color_texture.get());
+      g_gfx->SetTexture(1, m_intermediary_color_texture.get());
+      FillUniformBuffer(m_intermediary_color_texture->GetRect(),
+                        m_intermediary_color_texture.get(), 0, output_framebuffer->GetRect(),
+                        present_rect, m_uniform_staging_buffer.data(), true, false);
+      g_vertex_manager->UploadUtilityUniforms(m_uniform_staging_buffer.data(),
+                                              static_cast<u32>(m_uniform_staging_buffer.size()));
+      g_gfx->SetViewportAndScissor(g_gfx->ConvertFramebufferRectangle(dst, output_framebuffer));
+      g_gfx->SetPipeline(m_v3d_rcas_pipeline.get());
+      g_gfx->Draw(0, 3);
+      return;
+    }
+  }
+
+  // SGSR2 color-history fallback. Dolphin does not expose game motion vectors at presentation
+  // time yet, but this path still provides a real persistent temporal history with reactive
+  // rejection. Keeping it isolated here makes the history lifecycle explicit and leaves the
+  // normal post-processing path unchanged.
+  if (g_ActiveConfig.iV3DUpscalerMode == 4 &&
+      g_backend_info.api_type == APIType::Vulkan && m_v3d_history_copy_pipeline &&
+      (!copy_all_layers || src_tex->GetLayers() == 1) && present_rect.GetWidth() > 0 &&
+      present_rect.GetHeight() > 0 && src_rect.GetWidth() > 0 && src_rect.GetHeight() > 0)
+  {
+    const u32 target_width = static_cast<u32>(present_rect.GetWidth());
+    const u32 target_height = static_cast<u32>(present_rect.GetHeight());
+    const u64 current_time_ms = m_timer.ElapsedMs();
+    if (m_v3d_history_source_width != static_cast<u32>(src_rect.GetWidth()) ||
+        m_v3d_history_source_height != static_cast<u32>(src_rect.GetHeight()) ||
+        (m_v3d_history_last_time_ms != 0 && current_time_ms - m_v3d_history_last_time_ms > 250))
+    {
+      m_v3d_history_valid = false;
+    }
+    m_v3d_history_source_width = static_cast<u32>(src_rect.GetWidth());
+    m_v3d_history_source_height = static_cast<u32>(src_rect.GetHeight());
+    m_v3d_history_last_time_ms = current_time_ms;
+    const bool history_size_changed = !m_v3d_history_textures[0] ||
+                                      m_v3d_history_textures[0]->GetWidth() != target_width ||
+                                      m_v3d_history_textures[0]->GetHeight() != target_height;
+    if (history_size_changed)
+    {
+      const TextureConfig history_config(target_width, target_height, 1, 1, 1,
+                                          s_intermediary_buffer_format,
+                                          AbstractTextureFlag_RenderTarget,
+                                          AbstractTextureType::Texture_2DArray);
+      for (u32 i = 0; i < m_v3d_history_textures.size(); ++i)
+      {
+        m_v3d_history_textures[i] =
+            g_gfx->CreateTexture(history_config, fmt::format("V3D SGSR2 history {}", i));
+        m_v3d_history_frame_buffers[i] =
+            g_gfx->CreateFramebuffer(m_v3d_history_textures[i].get(), nullptr);
+      }
+      m_v3d_history_write_index = 0;
+      m_v3d_history_valid = false;
+    }
+
+    if (m_v3d_history_textures[0] && m_v3d_history_textures[1] &&
+        m_v3d_history_frame_buffers[0] && m_v3d_history_frame_buffers[1])
+    {
+      AbstractFramebuffer* const output_framebuffer = g_gfx->GetCurrentFramebuffer();
+      const u32 write_index = m_v3d_history_write_index;
+      const u32 read_index = write_index ^ 1;
+      AbstractTexture* const write_texture = m_v3d_history_textures[write_index].get();
+      AbstractTexture* const read_texture = m_v3d_history_textures[read_index].get();
+
+      g_gfx->SetFramebuffer(m_v3d_history_frame_buffers[write_index].get());
+      g_gfx->SetTexture(0, src_tex);
+      g_gfx->SetTexture(1, read_texture);
+      FillUniformBuffer(src_rect, src_tex, src_layer,
+                        m_v3d_history_frame_buffers[write_index]->GetRect(), present_rect,
+                        m_uniform_staging_buffer.data(), true, m_v3d_history_valid);
+      g_vertex_manager->UploadUtilityUniforms(m_uniform_staging_buffer.data(),
+                                              static_cast<u32>(m_uniform_staging_buffer.size()));
+      g_gfx->SetViewportAndScissor(g_gfx->ConvertFramebufferRectangle(
+          write_texture->GetRect(), m_v3d_history_frame_buffers[write_index].get()));
+      g_gfx->SetPipeline(m_pipeline.get());
+      g_gfx->Draw(0, 3);
+
+      g_gfx->SetFramebuffer(output_framebuffer);
+      g_gfx->SetTexture(0, write_texture);
+      g_gfx->SetTexture(1, write_texture);
+      FillUniformBuffer(write_texture->GetRect(), write_texture, 0,
+                        output_framebuffer->GetRect(), present_rect,
+                        m_default_uniform_staging_buffer.data(), false, false);
+      g_vertex_manager->UploadUtilityUniforms(
+          m_default_uniform_staging_buffer.data(),
+          static_cast<u32>(m_default_uniform_staging_buffer.size()));
+      g_gfx->SetViewportAndScissor(g_gfx->ConvertFramebufferRectangle(dst, output_framebuffer));
+      g_gfx->SetPipeline(m_v3d_history_copy_pipeline.get());
+      g_gfx->Draw(0, 3);
+
+      m_v3d_history_write_index ^= 1;
+      m_v3d_history_valid = true;
+      return;
+    }
+  }
 
   // Intermediary pass.
   // We draw to a high quality intermediary texture for a couple reasons:
@@ -963,6 +1118,7 @@ bool PostProcessing::CompilePixelShader()
 {
   m_default_pixel_shader.reset();
   m_pixel_shader.reset();
+  m_v3d_rcas_pixel_shader.reset();
 
   // Generate GLSL and compile the new shaders:
 
@@ -981,10 +1137,12 @@ bool PostProcessing::CompilePixelShader()
   }
 
   std::string post_processing_shader = g_ActiveConfig.sPostProcessingShader;
-  if (post_processing_shader.empty() && g_ActiveConfig.bV3DUpscalerExperiment &&
+  const int v3d_mode = g_ActiveConfig.iV3DUpscalerMode;
+  if (post_processing_shader.empty() && v3d_mode > 0 &&
+      v3d_mode <= static_cast<int>(s_v3d_upscaler_shader_names.size()) &&
       g_backend_info.api_type == APIType::Vulkan)
   {
-    post_processing_shader = s_v3d_upscaler_shader_name;
+    post_processing_shader = s_v3d_upscaler_shader_names[v3d_mode - 1];
   }
   m_config.LoadShader(post_processing_shader);
   m_pixel_shader = g_gfx->CreateShaderFromSource(
@@ -1008,6 +1166,19 @@ bool PostProcessing::CompilePixelShader()
   }
 
   m_uniform_staging_buffer.resize(CalculateUniformsSize(true));
+
+  if (v3d_mode == 5 && g_backend_info.api_type == APIType::Vulkan)
+  {
+    std::string rcas_shader_code;
+    if (!LoadShaderFromFile("V3D_RCAS", "", rcas_shader_code))
+      return false;
+
+    m_v3d_rcas_pixel_shader = g_gfx->CreateShaderFromSource(
+        ShaderStage::Pixel, GetHeader(true) + rcas_shader_code + GetFooter(), nullptr,
+        "V3D lightweight RCAS pixel shader");
+    if (!m_v3d_rcas_pixel_shader)
+      return false;
+  }
   return true;
 }
 
@@ -1065,10 +1236,37 @@ bool PostProcessing::CompilePipeline()
                                g_shader_cache->GetTexcoordGeometryShader() :
                                nullptr;
   config.pixel_shader = m_pixel_shader.get();
-  config.framebuffer_state = RenderState::GetColorFramebufferState(m_framebuffer_format);
+  const bool v3d_temporal = g_ActiveConfig.iV3DUpscalerMode == 4 &&
+                            g_backend_info.api_type == APIType::Vulkan;
+  const bool v3d_rcas = g_ActiveConfig.iV3DUpscalerMode == 5 &&
+                        g_backend_info.api_type == APIType::Vulkan;
+  config.framebuffer_state = RenderState::GetColorFramebufferState(
+      (v3d_temporal || v3d_rcas) ? s_intermediary_buffer_format : m_framebuffer_format);
   m_pipeline = g_gfx->CreatePipeline(config);
   if (!m_pipeline)
     return false;
+
+  if (v3d_temporal)
+  {
+    config.vertex_shader = m_default_vertex_shader.get();
+    config.geometry_shader = nullptr;
+    config.pixel_shader = m_default_pixel_shader.get();
+    config.framebuffer_state = RenderState::GetColorFramebufferState(m_framebuffer_format);
+    m_v3d_history_copy_pipeline = g_gfx->CreatePipeline(config);
+    if (!m_v3d_history_copy_pipeline)
+      return false;
+  }
+
+  if (v3d_rcas)
+  {
+    config.vertex_shader = m_vertex_shader.get();
+    config.geometry_shader = nullptr;
+    config.pixel_shader = m_v3d_rcas_pixel_shader.get();
+    config.framebuffer_state = RenderState::GetColorFramebufferState(m_framebuffer_format);
+    m_v3d_rcas_pipeline = g_gfx->CreatePipeline(config);
+    if (!m_v3d_rcas_pipeline)
+      return false;
+  }
 
   return true;
 }
