@@ -35,6 +35,7 @@ using TCShaderUid = ShaderUid<UidData>;
 
 ShaderCode GenerateVertexShader(APIType api_type);
 ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data);
+ShaderCode GenerateComputeShader(APIType api_type, const UidData* uid_data);
 
 TCShaderUid GetShaderUid(EFBCopyFormat dst_format, bool is_depth_copy, bool is_intensity,
                          bool scale_by_half, float gamma_rcp,

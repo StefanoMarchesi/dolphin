@@ -407,6 +407,7 @@ void ShaderCache::ClearCaches()
   m_color_pixel_shader.reset();
 
   m_efb_copy_to_vram_pipelines.clear();
+  m_efb_copy_to_vram_compute_shaders.clear();
   m_efb_copy_to_ram_pipelines.clear();
   m_copy_rgba8_pipeline.reset();
   m_rgba8_stereo_copy_pipeline.reset();
@@ -1288,6 +1289,21 @@ ShaderCache::GetEFBCopyToVRAMPipeline(const TextureConversionShaderGen::TCShader
   config.framebuffer_state = RenderState::GetRGBA8FramebufferState();
   config.usage = AbstractPipelineUsage::Utility;
   auto iiter = m_efb_copy_to_vram_pipelines.emplace(uid, g_gfx->CreatePipeline(config));
+  return iiter.first->second.get();
+}
+
+const AbstractShader*
+ShaderCache::GetEFBCopyToVRAMComputeShader(const TextureConversionShaderGen::TCShaderUid& uid)
+{
+  auto iter = m_efb_copy_to_vram_compute_shaders.find(uid);
+  if (iter != m_efb_copy_to_vram_compute_shaders.end())
+    return iter->second.get();
+
+  auto shader_code = TextureConversionShaderGen::GenerateComputeShader(m_api_type, uid.GetUidData());
+  auto shader = g_gfx->CreateShaderFromSource(
+      ShaderStage::Compute, shader_code.GetBuffer(), nullptr,
+      fmt::format("EFB copy to VRAM compute shader: {}", *uid.GetUidData()));
+  auto iiter = m_efb_copy_to_vram_compute_shaders.emplace(uid, std::move(shader));
   return iiter.first->second.get();
 }
 

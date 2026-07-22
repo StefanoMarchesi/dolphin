@@ -94,6 +94,8 @@ public:
   // EFB copy to RAM/VRAM pipelines
   const AbstractPipeline*
   GetEFBCopyToVRAMPipeline(const TextureConversionShaderGen::TCShaderUid& uid);
+  const AbstractShader*
+  GetEFBCopyToVRAMComputeShader(const TextureConversionShaderGen::TCShaderUid& uid);
   const AbstractPipeline* GetEFBCopyToRAMPipeline(const EFBCopyParams& uid);
 
   // RGBA8 framebuffer copy pipelines
@@ -235,6 +237,8 @@ private:
   // EFB copy to VRAM/RAM pipelines
   std::map<TextureConversionShaderGen::TCShaderUid, std::unique_ptr<AbstractPipeline>>
       m_efb_copy_to_vram_pipelines;
+  std::map<TextureConversionShaderGen::TCShaderUid, std::unique_ptr<AbstractShader>>
+      m_efb_copy_to_vram_compute_shaders;
   std::map<EFBCopyParams, std::unique_ptr<AbstractPipeline>> m_efb_copy_to_ram_pipelines;
 
   // Copy pipeline for RGBA8 textures

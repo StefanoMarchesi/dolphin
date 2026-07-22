@@ -95,7 +95,7 @@ ShaderCode GenerateVertexShader(APIType api_type)
   return out;
 }
 
-ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data)
+static ShaderCode GenerateCopyShader(APIType api_type, const UidData* uid_data, bool compute)
 {
   const bool mono_depth = uid_data->is_depth_copy && g_ActiveConfig.bStereoEFBMonoDepth;
 
@@ -122,7 +122,12 @@ ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data)
               "}}\n");
   }
 
-  if (g_backend_info.bSupportsGeometryShaders)
+  if (compute)
+  {
+    out.Write("IMAGE_BINDING(rgba8, 0) uniform writeonly image2DArray output_image;\n"
+              "layout(local_size_x = 8, local_size_y = 8) in;\n");
+  }
+  else if (g_backend_info.bSupportsGeometryShaders)
   {
     out.Write("VARYING_LOCATION(0) in VertexData {{\n"
               "  float3 v_tex0;\n"
@@ -133,8 +138,22 @@ ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data)
     out.Write("VARYING_LOCATION(0) in vec3 v_tex0;\n");
   }
 
-  out.Write("FRAGMENT_OUTPUT_LOCATION(0) out vec4 ocol0;\n"
-            "void main()\n{{\n");
+  if (compute)
+  {
+    out.Write("void main()\n{{\n"
+              "  int2 dst = int2(gl_GlobalInvocationID.xy);\n"
+              "  int2 dst_size = imageSize(output_image).xy;\n"
+              "  if (any(greaterThanEqual(dst, dst_size)))\n"
+              "    return;\n"
+              "  float2 dst_uv = (float2(dst) + float2(0.5)) / float2(dst_size);\n"
+              "  float3 v_tex0 = float3(src_offset + src_size * dst_uv, 0.0);\n"
+              "  vec4 ocol0;\n");
+  }
+  else
+  {
+    out.Write("FRAGMENT_OUTPUT_LOCATION(0) out vec4 ocol0;\n"
+              "void main()\n{{\n");
+  }
 
   // The copy filter applies to both color and depth copies. This has been verified on hardware.
   // The filter is only applied to the RGB channels, the alpha channel is left intact.
@@ -253,9 +272,21 @@ ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data)
     break;
   }
 
+  if (compute)
+    out.Write("  imageStore(output_image, int3(dst, 0), ocol0);\n");
   out.Write("}}\n");
 
   return out;
+}
+
+ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data)
+{
+  return GenerateCopyShader(api_type, uid_data, false);
+}
+
+ShaderCode GenerateComputeShader(APIType api_type, const UidData* uid_data)
+{
+  return GenerateCopyShader(api_type, uid_data, true);
 }
 
 }  // namespace TextureConversionShaderGen

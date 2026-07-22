@@ -2306,8 +2306,11 @@ void TextureCacheBase::CopyRenderTargetToTexture(
   if (copy_to_vram)
   {
     // create the texture
+    u32 texture_flags = AbstractTextureFlag_RenderTarget;
+    if (std::getenv("DOLPHIN_V3D_COMPUTE_EFB") != nullptr)
+      texture_flags |= AbstractTextureFlag_ComputeImage;
     const TextureConfig config(scaled_tex_w, scaled_tex_h, 1, g_framebuffer_manager->GetEFBLayers(),
-                               1, AbstractTextureFormat::RGBA8, AbstractTextureFlag_RenderTarget,
+                               1, AbstractTextureFormat::RGBA8, texture_flags,
                                AbstractTextureType::Texture_2DArray);
     entry = AllocateCacheEntry(config);
     if (entry)
@@ -2862,13 +2865,17 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
   // Flush EFB pokes first, as they're expected to be included.
   g_framebuffer_manager->FlushEFBPokes();
 
-  // Get the pipeline which we will be using. If the compilation failed, this will be null.
-  const AbstractPipeline* copy_pipeline = g_shader_cache->GetEFBCopyToVRAMPipeline(
-      TextureConversionShaderGen::GetShaderUid(dst_format, is_depth_copy, is_intensity,
-                                               scale_by_half, 1.0f / gamma, filter_coefficients));
-  if (!copy_pipeline)
+  const auto shader_uid = TextureConversionShaderGen::GetShaderUid(
+      dst_format, is_depth_copy, is_intensity, scale_by_half, 1.0f / gamma, filter_coefficients);
+  const bool use_compute = std::getenv("DOLPHIN_V3D_COMPUTE_EFB") != nullptr;
+  const AbstractShader* compute_shader =
+      use_compute ? g_shader_cache->GetEFBCopyToVRAMComputeShader(shader_uid) : nullptr;
+  const AbstractPipeline* copy_pipeline =
+      use_compute ? nullptr : g_shader_cache->GetEFBCopyToVRAMPipeline(shader_uid);
+  if ((use_compute && !compute_shader) || (!use_compute && !copy_pipeline))
   {
-    WARN_LOG_FMT(VIDEO, "Skipping EFB copy to VRAM due to missing pipeline.");
+    WARN_LOG_FMT(VIDEO, "Skipping EFB copy to VRAM due to missing {} shader.",
+                 use_compute ? "compute" : "graphics");
     return;
   }
 
@@ -2915,6 +2922,21 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
   uniforms.pixel_height = g_ActiveConfig.bCopyEFBScaled ? rcp_efb_height : 1.0f / EFB_HEIGHT;
   uniforms.padding = 0;
   g_vertex_manager->UploadUtilityUniforms(&uniforms, sizeof(uniforms));
+
+  if (use_compute)
+  {
+    g_gfx->SetTexture(0, src_texture);
+    g_gfx->SetSamplerState(0, linear_filter ? RenderState::GetLinearSamplerState() :
+                                              RenderState::GetPointSamplerState());
+    g_gfx->SetComputeImageTexture(0, entry->texture.get(), false, true);
+    constexpr u32 group_size = 8;
+    const u32 groups_x = (entry->texture->GetWidth() + group_size - 1) / group_size;
+    const u32 groups_y = (entry->texture->GetHeight() + group_size - 1) / group_size;
+    g_gfx->DispatchComputeShader(compute_shader, group_size, group_size, 1, groups_x, groups_y, 1);
+    g_gfx->EndUtilityDrawing();
+    entry->texture->FinishedRendering();
+    return;
+  }
 
   // Use the copy pipeline to render the VRAM copy.
   g_gfx->SetAndDiscardFramebuffer(entry->framebuffer.get());
