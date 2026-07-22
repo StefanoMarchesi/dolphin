@@ -20,7 +20,8 @@ namespace Vulkan
 {
 CommandBufferManager::CommandBufferManager(bool use_threaded_submission)
     : m_use_threaded_submission(use_threaded_submission),
-      m_v3d_perf_stats_enabled(std::getenv("DOLPHIN_V3D_PERF_STATS") != nullptr)
+      m_v3d_perf_stats_enabled(std::getenv("DOLPHIN_V3D_PERF_STATS") != nullptr),
+      m_v3d_fast_renderpass_enabled(std::getenv("DOLPHIN_V3D_FAST_RENDERPASS") != nullptr)
 {
 }
 

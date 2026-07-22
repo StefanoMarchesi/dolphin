@@ -722,6 +722,10 @@ void VKTexture::PrepareForRenderPass(VkCommandBuffer command_buffer) const
          m_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
   if (m_written_since_last_layout_change)
   {
+    // The opt-in V3D path provides this ordering through an external-to-subpass dependency.
+    if (g_command_buffer_mgr->UseV3DFastRenderPass())
+      return;
+
     // If the image has already been written, we need a barrier to prevent WaW or RaW hazards.
     VkPipelineStageFlags srcStage = 0;
     VkPipelineStageFlags dstStage = 0;

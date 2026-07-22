@@ -11,6 +11,7 @@
 #include "Common/LinearDiskCache.h"
 #include "Common/MsgHandler.h"
 
+#include "VideoBackends/Vulkan/CommandBufferManager.h"
 #include "VideoBackends/Vulkan/VKStreamBuffer.h"
 #include "VideoBackends/Vulkan/VKTexture.h"
 #include "VideoBackends/Vulkan/VulkanContext.h"
@@ -471,6 +472,29 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
       depth_reference_ptr,
       0,
       nullptr};
+
+  // The normal path emits an explicit same-layout image barrier before reusing an attachment.
+  // On V3D that turns every short render pass into an additional kernel submission dependency.
+  // The experimental path expresses the same attachment ordering in the render pass itself.
+  VkSubpassDependency attachment_dependency = {};
+  if (g_command_buffer_mgr->UseV3DFastRenderPass())
+  {
+    attachment_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    attachment_dependency.dstSubpass = 0;
+    attachment_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    attachment_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    attachment_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    attachment_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                                          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    attachment_dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+  }
+  const bool use_v3d_fast_renderpass = g_command_buffer_mgr->UseV3DFastRenderPass();
   VkRenderPassCreateInfo pass_info = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
                                       nullptr,
                                       0,
@@ -478,8 +502,8 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
                                       attachments.data(),
                                       1,
                                       &subpass,
-                                      0,
-                                      nullptr};
+                                      use_v3d_fast_renderpass ? 1u : 0u,
+                                      use_v3d_fast_renderpass ? &attachment_dependency : nullptr};
 
   VkRenderPass pass;
   VkResult res = vkCreateRenderPass(g_vulkan_context->GetDevice(), &pass_info, nullptr, &pass);
