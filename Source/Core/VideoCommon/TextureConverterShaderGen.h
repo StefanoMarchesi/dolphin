@@ -27,6 +27,7 @@ struct UidData
   u32 scale_by_half : 1;
   u32 all_copy_filter_coefs_needed : 1;
   u32 copy_filter_is_identity : 1;
+  u32 direct_color_copy : 1;
   u32 copy_filter_can_overflow : 1;
   u32 apply_gamma : 1;
 };
@@ -39,7 +40,7 @@ ShaderCode GeneratePixelShader(APIType api_type, const UidData* uid_data);
 ShaderCode GenerateComputeShader(APIType api_type, const UidData* uid_data);
 
 TCShaderUid GetShaderUid(EFBCopyFormat dst_format, bool is_depth_copy, bool is_intensity,
-                         bool scale_by_half, float gamma_rcp,
+                         bool scale_by_half, bool linear_filter, float gamma_rcp,
                          const std::array<u32, 3>& filter_coefficients);
 
 }  // namespace TextureConversionShaderGen
@@ -59,11 +60,13 @@ struct fmt::formatter<TextureConversionShaderGen::UidData>
     return fmt::format_to(ctx.out(),
                           "dst_format: {}, efb_has_alpha: {}, is_depth_copy: {}, is_intensity: {}, "
                           "scale_by_half: {}, all_copy_filter_coefs_needed: {}, "
-                          "copy_filter_is_identity: {}, copy_filter_can_overflow: {}, "
+                          "copy_filter_is_identity: {}, direct_color_copy: {}, "
+                          "copy_filter_can_overflow: {}, "
                           "apply_gamma: {}",
                           dst_format, uid.efb_has_alpha, uid.is_depth_copy, uid.is_intensity,
                           uid.scale_by_half, uid.all_copy_filter_coefs_needed,
-                          uid.copy_filter_is_identity, uid.copy_filter_can_overflow,
+                          uid.copy_filter_is_identity, uid.direct_color_copy,
+                          uid.copy_filter_can_overflow,
                           uid.apply_gamma);
   }
 };

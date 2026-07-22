@@ -2866,7 +2866,8 @@ void TextureCacheBase::CopyEFBToCacheEntry(RcTcacheEntry& entry, bool is_depth_c
   g_framebuffer_manager->FlushEFBPokes();
 
   const auto shader_uid = TextureConversionShaderGen::GetShaderUid(
-      dst_format, is_depth_copy, is_intensity, scale_by_half, 1.0f / gamma, filter_coefficients);
+      dst_format, is_depth_copy, is_intensity, scale_by_half, linear_filter, 1.0f / gamma,
+      filter_coefficients);
   const char* const compute_max_pixels_env = std::getenv("DOLPHIN_V3D_COMPUTE_EFB");
   const u64 compute_max_pixels =
       compute_max_pixels_env ? std::strtoull(compute_max_pixels_env, nullptr, 10) : 0;

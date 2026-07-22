@@ -3,6 +3,8 @@
 
 #include "VideoCommon/TextureConverterShaderGen.h"
 
+#include <cstdlib>
+
 #include "Common/CommonTypes.h"
 #include "VideoCommon/BPMemory.h"
 #include "VideoCommon/TextureCacheBase.h"
@@ -12,7 +14,7 @@
 namespace TextureConversionShaderGen
 {
 TCShaderUid GetShaderUid(EFBCopyFormat dst_format, bool is_depth_copy, bool is_intensity,
-                         bool scale_by_half, float gamma_rcp,
+                         bool scale_by_half, bool linear_filter, float gamma_rcp,
                          const std::array<u32, 3>& filter_coefficients)
 {
   TCShaderUid out;
@@ -46,6 +48,11 @@ TCShaderUid GetShaderUid(EFBCopyFormat dst_format, bool is_depth_copy, bool is_i
   uid_data->all_copy_filter_coefs_needed =
       TextureCacheBase::AllCopyFilterCoefsNeeded(filter_coefficients);
   uid_data->copy_filter_is_identity = filter_coefficients == std::array<u32, 3>{0, 64, 0};
+  uid_data->direct_color_copy =
+      std::getenv("DOLPHIN_V3D_DIRECT_EFB_COPY") != nullptr &&
+      uid_data->copy_filter_is_identity && !linear_filter && !is_depth_copy && !is_intensity &&
+      gamma_rcp == 1.0f &&
+      (dst_format == EFBCopyFormat::RGBA8 || dst_format == EFBCopyFormat::XFB);
   uid_data->copy_filter_can_overflow = TextureCacheBase::CopyFilterCanOverflow(filter_coefficients);
   // If the gamma is needed, then include that too.
   uid_data->apply_gamma = gamma_rcp != 1.0f;
@@ -104,6 +111,13 @@ static ShaderCode GenerateCopyShader(APIType api_type, const UidData* uid_data, 
   WriteHeader(api_type, out);
 
   out.Write("SAMPLER_BINDING(0) uniform sampler2DArray samp0;\n");
+  if (uid_data->direct_color_copy)
+  {
+    out.Write("float4 SampleEFBDirect(float3 uv) {{\n"
+              "  return texture(samp0, float3(uv.x, clamp(uv.y, clamp_tb.x, clamp_tb.y), {}));\n"
+              "}}\n",
+              mono_depth ? "0.0" : "uv.z");
+  }
   out.Write("uint4 SampleEFB(float3 uv, float y_offset) {{\n"
             "  float4 tex_sample = texture(samp0, float3(uv.x, clamp(uv.y + (y_offset * "
             "pixel_height), clamp_tb.x, clamp_tb.y), {}));\n",
@@ -158,7 +172,15 @@ static ShaderCode GenerateCopyShader(APIType api_type, const UidData* uid_data, 
 
   // The copy filter applies to both color and depth copies. This has been verified on hardware.
   // The filter is only applied to the RGB channels, the alpha channel is left intact.
-  if (uid_data->copy_filter_is_identity)
+  if (uid_data->direct_color_copy)
+  {
+    out.Write("  float4 direct_color = SampleEFBDirect(v_tex0);\n");
+    if (uid_data->dst_format == EFBCopyFormat::XFB || !uid_data->efb_has_alpha)
+      out.Write("  ocol0 = float4(direct_color.rgb, 1.0);\n");
+    else
+      out.Write("  ocol0 = direct_color;\n");
+  }
+  else if (uid_data->copy_filter_is_identity)
   {
     out.Write("  uint4 current_row = SampleEFB(v_tex0, 0.0f);\n"
               "  uint4 texcol_raw = uint4(current_row.rgb, {});\n",
@@ -178,7 +200,7 @@ static ShaderCode GenerateCopyShader(APIType api_type, const UidData* uid_data, 
     out.Write("  uint4 current_row = SampleEFB(v_tex0, 0.0f);\n"
               "  uint3 combined_rows = current_row.rgb * filter_coefficients[1];\n");
   }
-  if (!uid_data->copy_filter_is_identity)
+  if (!uid_data->copy_filter_is_identity && !uid_data->direct_color_copy)
   {
     out.Write("  // Shift right by 6 to divide by 64, as filter coefficients\n"
               "  // that sum to 64 result in no change in brightness\n"
@@ -186,19 +208,20 @@ static ShaderCode GenerateCopyShader(APIType api_type, const UidData* uid_data, 
               uid_data->efb_has_alpha ? "current_row.a" : "255");
   }
 
-  if (uid_data->copy_filter_can_overflow)
+  if (!uid_data->direct_color_copy && uid_data->copy_filter_can_overflow)
     out.Write("  texcol_raw &= 0x1ffu;\n");
   // Note that overflow occurs when the sum of values is >= 128, but this max situation can be hit
   // on >= 64, so we always include it.
-  out.Write("  texcol_raw = min(texcol_raw, uint4(255, 255, 255, 255));\n");
+  if (!uid_data->direct_color_copy)
+    out.Write("  texcol_raw = min(texcol_raw, uint4(255, 255, 255, 255));\n");
 
-  if (uid_data->apply_gamma)
+  if (!uid_data->direct_color_copy && uid_data->apply_gamma)
   {
     out.Write("  texcol_raw = uint4(round(pow(abs(float4(texcol_raw) / 255.0),\n"
               "                     float4(gamma_rcp, gamma_rcp, gamma_rcp, 1.0)) * 255.0));\n");
   }
 
-  if (uid_data->is_intensity)
+  if (!uid_data->direct_color_copy && uid_data->is_intensity)
   {
     out.Write("  // Intensity/YUV format conversion constants determined by hardware testing\n"
               "  const float4 y_const = float4( 66, 129,  25,  16);\n"
@@ -212,7 +235,8 @@ static ShaderCode GenerateCopyShader(APIType api_type, const UidData* uid_data, 
               "  texcol_raw.rgb = (texcol_raw.rgb >> 8) + ((texcol_raw.rgb >> 7) & 1u);\n");
   }
 
-  switch (uid_data->dst_format)
+  if (!uid_data->direct_color_copy)
+    switch (uid_data->dst_format)
   {
   case EFBCopyFormat::R4:  // R4
     out.Write("  float red = float(texcol_raw.r & 0xF0u) / 240.0;\n"
