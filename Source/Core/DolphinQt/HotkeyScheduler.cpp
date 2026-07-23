@@ -403,7 +403,10 @@ void HotkeyScheduler::Run()
         // that neither the user's IR nor the experimental mode is persisted.
         static int direct_efb_scale = 1;
         const int old_mode = Config::Get(Config::GFX_ENHANCE_V3D_UPSCALER_MODE);
-        const int new_mode = (old_mode + 1) % 7;
+        // Keep modes 5 and 6 available for explicit command-line testing, but
+        // exclude them from the controller cycle until their Vulkan output is
+        // reliable on V3D.
+        const int new_mode = (old_mode + 1) % 5;
         if (old_mode == 0)
         {
           direct_efb_scale = Config::Get(Config::GFX_EFB_SCALE);

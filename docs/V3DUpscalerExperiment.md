@@ -41,10 +41,12 @@ color-history experiment and can show double images during fast camera motion.
 
 The hotkey configuration contains a dedicated `V3D Experiment` group. Its
 `Cycle V3D Upscaler Mode` action currently switches at runtime through Direct,
-SGSR1 stock, SGSR1 edge-direction, SGSR1 contrast-relative, SGSR2 color-history,
-SGSR1 contrast-relative plus light RCAS, and SGSR2 plus duplicate-VI frame
-generation. The experimental modes use native 1x. All changes use Dolphin's
-session layer and therefore do not modify the saved graphics configuration.
+SGSR1 stock, SGSR1 edge-direction, SGSR1 contrast-relative, and SGSR2
+color-history. Modes 5 and 6 remain available for explicit command-line tests,
+but are excluded from the controller cycle until their Vulkan output is
+reliable on V3D. The experimental modes use native 1x. All changes use
+Dolphin's session layer and therefore do not modify the saved graphics
+configuration.
 
 Before exposing the setting in the UI:
 
